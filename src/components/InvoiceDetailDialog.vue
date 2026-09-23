@@ -51,11 +51,7 @@
                   <a class="text-secondary" :href="qrLink">
                     <q-responsive :ratio="1" class="q-mx-none">
                       <vue-qrcode
-                        :value="
-                          isOnchain
-                            ? 'bitcoin:' + invoiceData.request
-                            : 'lightning:' + invoiceData.request.toUpperCase()
-                        "
+                        :value="qrValue"
                         :options="{ width: 400 }"
                         class="rounded-borders"
                         style="width: 100%"
@@ -95,7 +91,7 @@
                     size="xs"
                     class="q-mr-xs"
                   />
-                  {{ invoiceData.request }}
+                  {{ qrLink }}
                 </div>
               </div>
             </div>
@@ -184,12 +180,13 @@ import { mapActions, mapState, mapWritableState } from "pinia";
 import VueQrcode from "@chenfengyuan/vue-qrcode";
 import { copyToClipboard } from "quasar";
 
-import { useWalletStore } from "../stores/wallet";
-import { useUiStore } from "../stores/ui";
-import { useWorkersStore } from "../stores/workers";
-import MeltQuoteInformation from "./MeltQuoteInformation.vue";
-import MintQuoteInformation from "./MintQuoteInformation.vue";
-import OnchainDepositLimits from "components/OnchainDepositLimits.vue";
+import { useWalletStore } from "src/stores/wallet";
+import { useUiStore } from "src/stores/ui";
+import { useWorkersStore } from "src/stores/workers";
+import MeltQuoteInformation from "src/components/MeltQuoteInformation.vue";
+import MintQuoteInformation from "src/components/MintQuoteInformation.vue";
+import OnchainDepositLimits from "src/components/OnchainDepositLimits.vue";
+import { bitcoinPaymentUri } from "src/js/onchain";
 import { PaymentMethod } from "src/stores/walletTypes";
 // type hint for global mixin
 declare const windowMixin: any;
@@ -259,9 +256,18 @@ export default defineComponent({
         this.invoiceData.type === PaymentMethod.OnchainSubpayment
       );
     },
+    qrValue(): string {
+      return this.isOnchain
+        ? this.qrLink
+        : "lightning:" + this.invoiceData.request.toUpperCase();
+    },
     qrLink(): string {
       if (this.isOnchain) {
-        return "bitcoin:" + this.invoiceData.request;
+        return bitcoinPaymentUri(
+          this.invoiceData.request,
+          this.invoiceData.requestedAmount,
+          this.invoiceData.unit
+        );
       }
       return "lightning:" + this.invoiceData.request;
     },
@@ -275,7 +281,7 @@ export default defineComponent({
   },
   methods: {
     onCopyBolt11: async function () {
-      const request = this.invoiceData?.request;
+      const request = this.isOnchain ? this.qrLink : this.invoiceData?.request;
       if (request) {
         try {
           await copyToClipboard(request);

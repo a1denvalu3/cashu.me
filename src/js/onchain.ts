@@ -1,3 +1,48 @@
+import type { PaymentMethodLimits } from "src/js/mint-payment-methods";
+
+export function onchainDepositAmountError(
+  amount: number,
+  unit: string,
+  limits: PaymentMethodLimits | null
+): string {
+  if (unit !== "sat" && unit !== "msat") {
+    return "On-chain deposits require a sat or msat mint.";
+  }
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    return `Enter a positive whole amount in ${unit}.`;
+  }
+  if (unit === "msat" && amount % 1000 !== 0) {
+    return "On-chain deposits must be in whole satoshis (1,000 msat).";
+  }
+  if (limits?.minAmount != null && amount < limits.minAmount) {
+    return `Enter at least ${limits.minAmount} ${unit}.`;
+  }
+  if (limits?.maxAmount != null && amount > limits.maxAmount) {
+    return `Enter no more than ${limits.maxAmount} ${unit}.`;
+  }
+  return "";
+}
+
+/** BIP321 amounts are decimal BTC, regardless of the wallet's display unit. */
+export function bitcoinPaymentUri(
+  address: string,
+  amount?: number,
+  unit = "sat"
+): string {
+  const normalized = normalizeBitcoinAddress(address);
+  const uri = normalized.toLowerCase().startsWith("tb1")
+    ? `bitcoin:?tb=${normalized}`
+    : `bitcoin:${normalized}`;
+  if (amount == null) return uri;
+  const error = onchainDepositAmountError(amount, unit, null);
+  if (error) throw new Error(error);
+  const sats = unit === "msat" ? amount / 1000 : amount;
+  // Format with integer arithmetic so a single sat never becomes "1e-8".
+  const whole = Math.floor(sats / 100_000_000);
+  const fraction = String(sats % 100_000_000).padStart(8, "0");
+  return `${uri}${uri.includes("?") ? "&" : "?"}amount=${whole}.${fraction}`;
+}
+
 export type MempoolTxMetadata = {
   txid: string;
   amount?: number;
@@ -15,7 +60,12 @@ export function normalizeBitcoinAddress(value: string): string {
   const trimmed = value.trim();
   if (!trimmed.toLowerCase().startsWith("bitcoin:")) return trimmed;
   const withoutScheme = trimmed.replace(/^bitcoin:/i, "");
-  return withoutScheme.split("?")[0];
+  const [address, query] = withoutScheme.split("?");
+  if (address) return address;
+  for (const [key, value] of new URLSearchParams(query)) {
+    if (["bc", "tb", "bcrt"].includes(key.toLowerCase())) return value;
+  }
+  return "";
 }
 
 export function onchainNetwork(address: string): OnchainNetwork {

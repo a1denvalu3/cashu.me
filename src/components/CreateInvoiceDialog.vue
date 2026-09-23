@@ -72,6 +72,12 @@
               :filter-payment-method="mintFilterMethod"
               filter-mint-operation="mint"
             />
+            <OnchainDepositLimits
+              v-if="isOnchain"
+              class="q-mt-sm"
+              :mint-url="activeMintUrl"
+              :unit="activeUnit"
+            />
           </div>
         </div>
 
@@ -139,25 +145,25 @@
                 </template>
               </div>
             </div>
-            <div
-              v-else-if="isOnchain && checkingReusableOnchainQuote"
-              key="checking-onchain"
-              class="column items-center justify-center q-pa-xl q-my-auto"
-            >
-              <q-spinner size="48px" color="primary" />
-              <div class="text-grey-6 q-mt-md">Checking address...</div>
-            </div>
-
             <AmountInputComponent
               v-else-if="showAmountInput"
               key="amount-input"
               class="q-my-auto"
               v-model="invoiceData.amount"
-              :enabled="true"
+              :enabled="!createInvoiceButtonBlocked"
+              :muted="isOnchain && !!onchainAmountError"
               @enter="requestMintButton"
               @fiat-mode-changed="fiatKeyboardMode = $event"
             />
           </transition>
+          <div
+            v-if="isOnchain && onchainAmountError"
+            class="text-negative text-center text-body2 q-mb-sm"
+            role="status"
+            data-testid="onchain-amount-error"
+          >
+            {{ onchainAmountError }}
+          </div>
         </div>
 
         <!-- Numeric keypad -->
@@ -248,9 +254,9 @@ import { defineComponent } from "vue";
 import { mapActions, mapState, mapWritableState } from "pinia";
 import { copyToClipboard } from "quasar";
 import VueQrcode from "@chenfengyuan/vue-qrcode";
-import ChooseMint from "components/ChooseMint.vue";
-import NumericKeyboard from "components/NumericKeyboard.vue";
-import AmountInputComponent from "components/AmountInputComponent.vue";
+import ChooseMint from "src/components/ChooseMint.vue";
+import NumericKeyboard from "src/components/NumericKeyboard.vue";
+import AmountInputComponent from "src/components/AmountInputComponent.vue";
 import { useWalletStore } from "src/stores/wallet";
 import { useUiStore } from "src/stores/ui";
 import { useMintsStore } from "src/stores/mints";
@@ -258,7 +264,12 @@ import { useSettingsStore } from "src/stores/settings";
 import { usePriceStore } from "src/stores/price";
 import type { InvoiceHistory } from "src/stores/wallet";
 import { PaymentMethod } from "src/stores/walletTypes";
-import { mintSupportsPaymentMethod } from "src/js/mint-payment-methods";
+import {
+  mintPaymentMethodLimits,
+  mintSupportsPaymentMethod,
+} from "src/js/mint-payment-methods";
+import { onchainDepositAmountError } from "src/js/onchain";
+import OnchainDepositLimits from "src/components/OnchainDepositLimits.vue";
 import { useNpubCashStore } from "src/stores/npubcash";
 import { lightningAddressToLnurl } from "src/js/lnurl";
 
@@ -272,6 +283,7 @@ export default defineComponent({
     NumericKeyboard,
     AmountInputComponent,
     VueQrcode,
+    OnchainDepositLimits,
   },
   props: {},
   data: function () {
@@ -285,8 +297,6 @@ export default defineComponent({
       copyButtonCopied: false,
       copyButtonTimeout: null as any,
       refreshingMint: false,
-      checkingReusableOnchainQuote: false,
-      checkedReusableOnchainQuote: null as InvoiceHistory | null,
     };
   },
   computed: {
@@ -323,7 +333,7 @@ export default defineComponent({
     },
     showAmountInput(): boolean {
       if (this.showNpubCashPreview) return false;
-      if (this.isOnchain) return false;
+      if (this.isOnchain) return true;
       if (!this.isBolt12) return true;
       return this.bolt12AddAmount;
     },
@@ -416,22 +426,41 @@ export default defineComponent({
           copied: this.npubCashAddressCopied,
         };
       }
-      if (!this.checkingReusableOnchainQuote && this.showReusableQuote) {
+      if (this.showReusableQuote) {
         return {
           key: "reusable-quote",
           kind: "reusable",
           value: this.reusableQrValue,
-          text: this.reusableReceiveQuote?.request || "",
+          text: this.reusableBolt12Offer?.request || "",
           copied: this.copyButtonCopied,
         };
       }
       return null;
     },
+    onchainAmountError(): string {
+      if (!this.isOnchain) return "";
+      return onchainDepositAmountError(
+        Number(this.invoiceData.amount) * this.activeUnitCurrencyMultiplyer,
+        this.activeUnit,
+        mintPaymentMethodLimits(
+          this.activeMint,
+          PaymentMethod.Onchain,
+          "mint",
+          this.activeUnit
+        )
+      );
+    },
     canCreate(): boolean {
-      if (this.activeMintErrored) return false;
-      // Bolt11 requires amount > 0
-      // Bolt12 and on-chain allow 0 amount (amountless request)
-      if (this.isBolt12 || this.isOnchain) return true;
+      if (
+        this.activeMintErrored ||
+        this.createInvoiceButtonBlocked ||
+        this.globalMutexLock
+      )
+        return false;
+      if (this.isOnchain)
+        return this.onchainSupported && !this.onchainAmountError;
+      // Bolt12 supports amountless offers; Bolt11 requires a positive amount.
+      if (this.isBolt12) return true;
       return (
         this.invoiceData.amount != null && Number(this.invoiceData.amount) > 0
       );
@@ -441,7 +470,7 @@ export default defineComponent({
         return this.showReusableQuote ? "New Offer" : "Create Offer";
       }
       if (this.isOnchain) {
-        return this.showReusableQuote ? "Create New Address" : "Create Address";
+        return "Create Address";
       }
       return this.$t("InvoiceDetailDialog.actions.create.label") as string;
     },
@@ -484,24 +513,15 @@ export default defineComponent({
       }
       return null;
     },
-    reusableOnchainQuote(): InvoiceHistory | null {
-      return this.checkedReusableOnchainQuote;
-    },
-    reusableReceiveQuote(): InvoiceHistory | null {
-      return this.isOnchain
-        ? this.reusableOnchainQuote
-        : this.reusableBolt12Offer;
-    },
     reusableQrValue(): string {
-      const request = this.reusableReceiveQuote?.request || "";
-      if (this.isOnchain) return `bitcoin:${request}`;
+      const request = this.reusableBolt12Offer?.request || "";
       return `lightning:${request.toUpperCase()}`;
     },
     showReusableQuote(): boolean {
       return (
-        (this.isBolt12 || this.isOnchain) &&
+        this.isBolt12 &&
         !this.showAmountInput &&
-        this.reusableReceiveQuote !== null
+        this.reusableBolt12Offer !== null
       );
     },
   },
@@ -513,9 +533,6 @@ export default defineComponent({
         this.$nextTick(() => {
           this.showNumericKeyboard = !this.showNpubCashPreview;
         });
-        this.refreshReusableOnchainQuote();
-      } else {
-        this.checkedReusableOnchainQuote = null;
       }
     },
     activeMintUrl: {
@@ -534,7 +551,6 @@ export default defineComponent({
     },
     activeUnit: function () {
       this.syncInvoiceTypeWithActiveMint();
-      this.refreshReusableOnchainQuote();
     },
   },
   methods: {
@@ -594,7 +610,6 @@ export default defineComponent({
         } else if (!this.onchainSupported && this.bolt12Supported) {
           this.invoiceData.type = PaymentMethod.Bolt12;
         }
-        this.refreshReusableOnchainQuote();
         return;
       }
       if (this.bolt11Supported && !this.bolt12Supported) {
@@ -618,7 +633,7 @@ export default defineComponent({
         const wallet = await this.activeWallet(true);
 
         if (this.isOnchain) {
-          const mintQuote = await this.requestMintOnchain(wallet);
+          const mintQuote = await this.requestMintOnchain(amount, wallet);
 
           this.showCreateInvoiceDialog = false;
           this.showInvoiceDetails = true;
@@ -650,7 +665,7 @@ export default defineComponent({
       if (this.activeMintErrored) {
         return;
       }
-      const offer = this.reusableReceiveQuote;
+      const offer = this.reusableBolt12Offer;
       const request = offer?.request;
       if (request) {
         try {
@@ -674,39 +689,11 @@ export default defineComponent({
       this.refreshingMint = true;
       try {
         await this.activateMintUrl(this.activeMintUrl, false, true);
-        this.refreshReusableOnchainQuote();
       } catch (error) {
         console.error("Could not refresh mint", error);
       } finally {
         this.refreshingMint = false;
       }
-    },
-    findReusableOnchainQuotes(): InvoiceHistory[] {
-      const walletStore = useWalletStore();
-      const mintStore = useMintsStore();
-      const now = Date.now();
-      return walletStore.invoiceHistory
-        .filter((invoice: InvoiceHistory) => {
-          if (invoice.type !== PaymentMethod.Onchain) return false;
-          if (invoice.amount < 0) return false;
-          // A paid address must never be offered again, to avoid address reuse.
-          if (invoice.status !== "pending") return false;
-          const quote = invoice.mintQuote as any;
-          if (quote?.expiry && quote.expiry > 0 && quote.expiry * 1000 < now) {
-            return false;
-          }
-          if (invoice.mint !== mintStore.activeMintUrl) return false;
-          if (invoice.unit !== mintStore.activeUnit) return false;
-          if (!invoice.request) return false;
-          return true;
-        })
-        .reverse();
-    },
-    refreshReusableOnchainQuote() {
-      if (!this.showCreateInvoiceDialog || !this.isOnchain) return;
-      this.checkingReusableOnchainQuote = false;
-      this.checkedReusableOnchainQuote =
-        this.findReusableOnchainQuotes()[0] || null;
     },
   },
   beforeUnmount() {

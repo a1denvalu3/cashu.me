@@ -106,7 +106,7 @@ import {
   isLegacyRetailQR,
   translateLegacyQRToLightningAddress,
 } from "src/js/legacy-qr";
-import { onchainNetwork } from "src/js/onchain";
+import { normalizeBitcoinAddress, onchainNetwork } from "src/js/onchain";
 import { PaymentMethod } from "src/stores/walletTypes";
 
 type Invoice = {
@@ -131,6 +131,7 @@ type AppMintQuote = Omit<
 };
 
 export type InvoiceHistory = Invoice & {
+  requestedAmount?: number;
   id?: string;
   date: string;
   status: "pending" | "paid";
@@ -1531,7 +1532,7 @@ export const useWalletStore = defineStore("wallet", {
           const url = new URL(
             req.replace(/^bitcoin:/i, "bitcoin://placeholder/")
           );
-          const address = url.pathname.replace(/^\//, "");
+          const address = normalizeBitcoinAddress(req);
           // BIP-321 query keys are case-insensitive (per RFC 3986 / BIP-21).
           // Encoders may emit fully uppercase URIs to enable QR alphanumeric
           // mode for denser codes (e.g. CDK, cashu-for-woocommerce).

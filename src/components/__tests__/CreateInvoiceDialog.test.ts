@@ -1,5 +1,4 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { PaymentMethod } from "src/stores/walletTypes";
 
 const stores = vi.hoisted(() => ({
   wallet: { invoiceHistory: [] as any[] },
@@ -64,22 +63,129 @@ describe("CreateInvoiceDialog", () => {
     ).toBe(true);
   });
 
-  it("does not reuse an on-chain address after it has been paid", () => {
-    stores.wallet.invoiceHistory = [
-      {
-        amount: 100,
-        date: "2026-08-18T00:00:00.000Z",
-        mint: "https://mint.example",
-        request: "bc1qalreadyusedaddress",
-        status: "paid",
-        type: PaymentMethod.Onchain,
-        unit: "sat",
+  it("always asks for an amount when receiving on-chain", () => {
+    const context = {
+      isOnchain: true,
+      isBolt12: false,
+      showNpubCashPreview: false,
+      reusableBolt12Offer: { request: "lno1offer" },
+    };
+    expect(CreateInvoiceDialog.computed.showAmountInput.call(context)).toBe(
+      true
+    );
+    expect(CreateInvoiceDialog.computed.showReusableQuote.call(context)).toBe(
+      false
+    );
+  });
+
+  it.each([0, -1, 999, 5001, 1000.5, NaN, Infinity])(
+    "blocks invalid on-chain amount %s, including keyboard submission",
+    async (amount) => {
+      const context: any = {
+        isOnchain: true,
+        onchainSupported: true,
+        invoiceData: { amount },
+        activeUnit: "sat",
+        activeUnitCurrencyMultiplyer: 1,
+        activeMint: {
+          info: {
+            nuts: {
+              4: {
+                methods: [
+                  {
+                    method: "bolt11",
+                    unit: "sat",
+                    min_amount: 1,
+                    max_amount: 1000000,
+                  },
+                  {
+                    method: "onchain",
+                    unit: "sat",
+                    min_amount: 1000,
+                    max_amount: 5000,
+                  },
+                ],
+              },
+            },
+          },
+        },
+        activeWallet: vi.fn(),
+        requestMintOnchain: vi.fn(),
+      };
+      context.onchainAmountError =
+        CreateInvoiceDialog.computed.onchainAmountError.call(context);
+      context.canCreate = CreateInvoiceDialog.computed.canCreate.call(context);
+      expect(context.onchainAmountError).not.toBe("");
+      expect(context.canCreate).toBe(false);
+      await CreateInvoiceDialog.methods.requestMintButton.call(context);
+      expect(context.activeWallet).not.toHaveBeenCalled();
+      expect(context.requestMintOnchain).not.toHaveBeenCalled();
+    }
+  );
+
+  it("revalidates the amount against the selected mint and unit", () => {
+    const context: any = {
+      isOnchain: true,
+      invoiceData: { amount: 1000 },
+      activeUnit: "sat",
+      activeUnitCurrencyMultiplyer: 1,
+      activeMint: {
+        info: {
+          nuts: {
+            4: {
+              methods: [
+                {
+                  method: "onchain",
+                  unit: "sat",
+                  min_amount: 1000,
+                  max_amount: 5000,
+                },
+                {
+                  method: "onchain",
+                  unit: "msat",
+                  min_amount: 2000,
+                  max_amount: 5000000,
+                },
+              ],
+            },
+          },
+        },
       },
-    ] as any;
+    };
+    const error = () =>
+      CreateInvoiceDialog.computed.onchainAmountError.call(context);
+    expect(error()).toBe("");
+    context.invoiceData.amount = 5000;
+    expect(error()).toBe("");
+    context.invoiceData.amount = 1000;
+    context.activeUnit = "msat";
+    expect(error()).toContain("2000 msat");
+    context.activeMint = {
+      info: {
+        nuts: {
+          4: {
+            methods: [{ method: "onchain", unit: "msat", min_amount: 10000 }],
+          },
+        },
+      },
+    };
+    expect(error()).toContain("10000 msat");
+  });
 
-    const reusableQuotes =
-      CreateInvoiceDialog.methods.findReusableOnchainQuotes.call({});
-
-    expect(reusableQuotes).toEqual([]);
+  it("passes the chosen on-chain amount to quote creation", async () => {
+    const mintWallet = {};
+    const context: any = {
+      canCreate: true,
+      isOnchain: true,
+      invoiceData: { amount: 1234 },
+      activeUnitCurrencyMultiplyer: 1,
+      activeWallet: vi.fn().mockResolvedValue(mintWallet),
+      requestMintOnchain: vi.fn().mockResolvedValue({ quote: "onchain-q" }),
+      mintOnPaidOnchain: vi.fn(),
+    };
+    await CreateInvoiceDialog.methods.requestMintButton.call(context);
+    expect(context.requestMintOnchain).toHaveBeenCalledWith(1234, mintWallet);
+    expect(context.showInvoiceDetails).toBe(true);
+    expect(context.createInvoiceButtonBlocked).toBe(false);
   });
 });
