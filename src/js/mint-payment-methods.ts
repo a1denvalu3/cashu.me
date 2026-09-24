@@ -1,6 +1,7 @@
 import type { GetInfoResponse } from "@cashu/cashu-ts";
 import type { StoredMint } from "src/stores/mints";
 import { PaymentMethod } from "src/stores/walletTypes";
+import { cashuAmountToNumber } from "src/js/cashu-amount";
 
 function nut4Config(info?: GetInfoResponse) {
   return info?.nuts?.[4] || info?.nuts?.["4"] || ({} as any);
@@ -12,13 +13,6 @@ export type PaymentMethodLimits = {
   minAmount: number | null;
   maxAmount: number | null;
 };
-
-function amountLikeToNumber(value: any): number | null {
-  if (value == null) return null;
-  if (typeof value?.toNumber === "function") return value.toNumber();
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : null;
-}
 
 export function mintPaymentMethodLimits(
   mint: StoredMint | undefined,
@@ -39,8 +33,14 @@ export function mintPaymentMethodLimits(
   );
   if (!advertisedMethod) return null;
 
-  const minAmount = amountLikeToNumber(advertisedMethod.min_amount);
-  const maxAmount = amountLikeToNumber(advertisedMethod.max_amount);
+  const minAmount =
+    advertisedMethod.min_amount == null
+      ? null
+      : cashuAmountToNumber(advertisedMethod.min_amount);
+  const maxAmount =
+    advertisedMethod.max_amount == null
+      ? null
+      : cashuAmountToNumber(advertisedMethod.max_amount);
   if (minAmount == null && maxAmount == null) return null;
   return { minAmount, maxAmount };
 }
