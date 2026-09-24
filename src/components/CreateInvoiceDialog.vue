@@ -72,12 +72,6 @@
               :filter-payment-method="mintFilterMethod"
               filter-mint-operation="mint"
             />
-            <OnchainDepositLimits
-              v-if="isOnchain"
-              class="q-mt-sm"
-              :mint-url="activeMintUrl"
-              :unit="activeUnit"
-            />
           </div>
         </div>
 
@@ -269,7 +263,6 @@ import {
   mintSupportsPaymentMethod,
 } from "src/js/mint-payment-methods";
 import { onchainDepositAmountError } from "src/js/onchain";
-import OnchainDepositLimits from "src/components/OnchainDepositLimits.vue";
 import { useNpubCashStore } from "src/stores/npubcash";
 import { lightningAddressToLnurl } from "src/js/lnurl";
 
@@ -283,7 +276,6 @@ export default defineComponent({
     NumericKeyboard,
     AmountInputComponent,
     VueQrcode,
-    OnchainDepositLimits,
   },
   props: {},
   data: function () {
