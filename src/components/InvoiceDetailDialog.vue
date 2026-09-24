@@ -48,7 +48,11 @@
                 style="max-width: 600px"
               >
                 <div class="qr-container">
-                  <a class="text-secondary" :href="qrLink">
+                  <component
+                    :is="isOnchain ? 'div' : 'a'"
+                    class="text-secondary"
+                    :href="qrLink"
+                  >
                     <q-responsive :ratio="1" class="q-mx-none">
                       <vue-qrcode
                         :value="qrValue"
@@ -58,7 +62,7 @@
                       >
                       </vue-qrcode>
                     </q-responsive>
-                  </a>
+                  </component>
                   <!-- Checkmark overlay when paid -->
                   <div
                     v-if="invoiceData.status === 'paid'"
@@ -91,7 +95,7 @@
                     size="xs"
                     class="q-mr-xs"
                   />
-                  {{ qrLink }}
+                  {{ invoiceData.request }}
                 </div>
               </div>
             </div>
@@ -186,7 +190,6 @@ import { useWorkersStore } from "src/stores/workers";
 import MeltQuoteInformation from "src/components/MeltQuoteInformation.vue";
 import MintQuoteInformation from "src/components/MintQuoteInformation.vue";
 import OnchainDepositLimits from "src/components/OnchainDepositLimits.vue";
-import { bitcoinPaymentUri } from "src/js/onchain";
 import { PaymentMethod } from "src/stores/walletTypes";
 // type hint for global mixin
 declare const windowMixin: any;
@@ -258,18 +261,13 @@ export default defineComponent({
     },
     qrValue(): string {
       return this.isOnchain
-        ? this.qrLink
+        ? this.invoiceData.request
         : "lightning:" + this.invoiceData.request.toUpperCase();
     },
-    qrLink(): string {
-      if (this.isOnchain) {
-        return bitcoinPaymentUri(
-          this.invoiceData.request,
-          this.invoiceData.requestedAmount,
-          this.invoiceData.unit
-        );
-      }
-      return "lightning:" + this.invoiceData.request;
+    qrLink(): string | undefined {
+      return this.isOnchain
+        ? undefined
+        : "lightning:" + this.invoiceData.request;
     },
   },
   watch: {
@@ -281,7 +279,7 @@ export default defineComponent({
   },
   methods: {
     onCopyBolt11: async function () {
-      const request = this.isOnchain ? this.qrLink : this.invoiceData?.request;
+      const request = this.invoiceData?.request;
       if (request) {
         try {
           await copyToClipboard(request);

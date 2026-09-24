@@ -135,7 +135,6 @@ type AppMintQuote = Omit<
 };
 
 export type InvoiceHistory = Invoice & {
-  requestedAmount?: number;
   id?: string;
   date: string;
   status: "pending" | "paid";

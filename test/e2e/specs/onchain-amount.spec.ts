@@ -5,7 +5,7 @@ import { WalletUi } from "../pages/WalletUi";
 
 test.use({ viewport: { width: 390, height: 844 } });
 
-test("requires an in-range on-chain amount and preserves its payment URI in history", async ({
+test("requires an in-range on-chain amount and displays a bare address in receive and history", async ({
   page,
 }) => {
   const wallet = new WalletUi(page);
@@ -68,15 +68,14 @@ test("requires an in-range on-chain amount and preserves its payment URI in hist
   );
   await create.click();
   const quote = await (await created).json();
-  const uri = quote.request.startsWith("tb1")
-    ? `bitcoin:?tb=${quote.request}&amount=0.00001000`
-    : `bitcoin:${quote.request}?amount=0.00001000`;
-  const qrLink = page.locator(".qr-container:visible a");
-  await expect(qrLink).toHaveAttribute("href", uri);
+  const addressText = page.locator(".qr-copy-text:visible");
+  await expect(addressText).toContainText(quote.request);
+  await expect(addressText).not.toContainText("bitcoin:");
+  await expect(page.locator(".qr-container:visible a")).toHaveCount(0);
   await page.locator(".qr-copy-text:visible").click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe(uri);
+    .toBe(quote.request);
   expect(submissions).toBe(1);
   await wallet.closeFullscreenDialog();
   await wallet.openReceive("onchain");
@@ -90,7 +89,8 @@ test("requires an in-range on-chain amount and preserves its payment URI in hist
     .first()
     .getByTestId("history-details")
     .click();
-  await expect(qrLink).toHaveAttribute("href", uri);
+  await expect(addressText).toContainText(quote.request);
+  await expect(addressText).not.toContainText("bitcoin:");
 });
 
 test("pays BIP321 on-chain URIs using their encoded amounts", async ({

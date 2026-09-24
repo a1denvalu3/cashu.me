@@ -92,9 +92,6 @@ export async function requestMintOnchain(
 
     const invoice: InvoiceHistory = {
       amount,
-      // The protocol quote is amountless; keep the user's payment instruction
-      // separately so quote refreshes and settlement cannot change its URI.
-      requestedAmount: amount,
       request: data.request,
       quote: data.quote,
       memo: "",

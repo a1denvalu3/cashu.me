@@ -1086,27 +1086,24 @@ describe("wallet store", () => {
     );
 
     it.each([1000, 5000])(
-      "accepts the inclusive boundary %s and persists the requested amount",
+      "accepts the inclusive boundary %s and persists the deposit amount",
       async (amount) => {
         const wallet = useWalletStore();
         await wallet.requestMintOnchain(amount, mintWallet);
         expect(mintWallet.createMintQuoteOnchain).toHaveBeenCalledOnce();
         expect(wallet.invoiceData).toMatchObject({
           amount,
-          requestedAmount: amount,
           request: quote.request,
         });
         expect(await cashuDb.paymentHistory.toArray()).toEqual([
           expect.objectContaining({
             amount,
-            requestedAmount: amount,
             request: quote.request,
           }),
         ]);
         await wallet.setInvoicePaid(quote.quote, { amount: 1500 });
         expect((await cashuDb.paymentHistory.toArray())[0]).toMatchObject({
           amount: 1500,
-          requestedAmount: amount,
           status: "paid",
         });
       }

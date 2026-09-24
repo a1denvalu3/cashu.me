@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  bitcoinPaymentUri,
   bitcoinUriAmountSats,
   onchainDepositAmountError,
   onchainAddressExplorerUrl,
@@ -76,45 +75,6 @@ describe("onchainDepositAmountError", () => {
   });
 });
 
-describe("bitcoinPaymentUri", () => {
-  it.each([
-    [1, "0.00000001"],
-    [1000, "0.00001000"],
-    [123456789, "1.23456789"],
-    [2100000000000000, "21000000.00000000"],
-  ])("encodes %s sats as exact decimal BTC", (amount, btc) => {
-    expect(bitcoinPaymentUri("bc1qaddress", amount)).toBe(
-      `bitcoin:bc1qaddress?amount=${btc}`
-    );
-  });
-
-  it("converts msat to BTC and keeps legacy amountless requests readable", () => {
-    expect(bitcoinPaymentUri("bc1qaddress", 1000, "msat")).toBe(
-      "bitcoin:bc1qaddress?amount=0.00000001"
-    );
-    expect(bitcoinPaymentUri("bc1qaddress")).toBe("bitcoin:bc1qaddress");
-  });
-
-  it("normalizes an existing URI without duplicating the scheme or amount", () => {
-    expect(bitcoinPaymentUri("bitcoin:bc1qaddress?amount=1", 1000)).toBe(
-      "bitcoin:bc1qaddress?amount=0.00001000"
-    );
-  });
-
-  it("uses the testnet payment instruction and keeps its explorer link", () => {
-    const uri = bitcoinPaymentUri("tb1qaddress", 1000);
-    expect(uri).toBe("bitcoin:?tb=tb1qaddress&amount=0.00001000");
-    expect(onchainAddressExplorerUrl(uri)).toBe(
-      "https://mutinynet.com/address/tb1qaddress"
-    );
-  });
-
-  it("never rounds a fractional satoshi into a payment instruction", () => {
-    expect(() => bitcoinPaymentUri("bc1qaddress", 0.5)).toThrow();
-    expect(() => bitcoinPaymentUri("bc1qaddress", 1001, "msat")).toThrow();
-  });
-});
-
 describe("bitcoinUriAmountSats", () => {
   it.each([
     ["amount=0.00000001", 1],
@@ -156,9 +116,11 @@ describe("bitcoinUriAmountSats", () => {
     expect(() => bitcoinUriAmountSats(new URLSearchParams(query))).toThrow();
   });
 
-  it("reads amounts produced by our receive flow", () => {
-    for (const address of ["bc1qaddress", "tb1qaddress"]) {
-      const uri = bitcoinPaymentUri(address, 1234);
+  it("reads amounts from address-body and query-address URIs", () => {
+    for (const uri of [
+      "bitcoin:bc1qaddress?amount=0.00001234",
+      "bitcoin:?tb=tb1qaddress&amount=0.00001234",
+    ]) {
       expect(bitcoinUriAmountSats(new URL(uri).searchParams)).toBe(1234);
     }
   });

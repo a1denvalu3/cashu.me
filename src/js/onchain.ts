@@ -53,26 +53,6 @@ export function onchainDepositAmountError(
   return "";
 }
 
-/** BIP321 amounts are decimal BTC, regardless of the wallet's display unit. */
-export function bitcoinPaymentUri(
-  address: string,
-  amount?: number,
-  unit = "sat"
-): string {
-  const normalized = normalizeBitcoinAddress(address);
-  const uri = normalized.toLowerCase().startsWith("tb1")
-    ? `bitcoin:?tb=${normalized}`
-    : `bitcoin:${normalized}`;
-  if (amount == null) return uri;
-  const error = onchainDepositAmountError(amount, unit, null);
-  if (error) throw new Error(error);
-  const sats = unit === "msat" ? amount / 1000 : amount;
-  // Format with integer arithmetic so a single sat never becomes "1e-8".
-  const whole = Math.floor(sats / 100_000_000);
-  const fraction = String(sats % 100_000_000).padStart(8, "0");
-  return `${uri}${uri.includes("?") ? "&" : "?"}amount=${whole}.${fraction}`;
-}
-
 export type MempoolTxMetadata = {
   txid: string;
   amount?: number;

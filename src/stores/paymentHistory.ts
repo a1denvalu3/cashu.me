@@ -49,7 +49,6 @@ export type MeltQuoteRow = {
 };
 
 export type PaymentHistoryRow = {
-  requestedAmount?: number;
   id: string;
   direction: PaymentDirection;
   quote: string;
@@ -216,7 +215,6 @@ export function buildPaymentRowsFromLegacyInvoice(
     method,
     paymentType,
     amount: Number(invoice.amount || 0),
-    requestedAmount: invoice.requestedAmount,
     request:
       invoice.request ||
       invoice.mintQuote?.request ||

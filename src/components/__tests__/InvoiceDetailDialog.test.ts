@@ -19,8 +19,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("InvoiceDetailDialog payment URI", () => {
-  it("uses the original requested amount for the QR, link, and clipboard after settlement", async () => {
+describe("InvoiceDetailDialog payment display", () => {
+  it("uses a bare on-chain address for the QR and clipboard even for older URI-enabled history", async () => {
     vi.useFakeTimers();
     const context: any = {
       isOnchain: true,
@@ -32,21 +32,21 @@ describe("InvoiceDetailDialog payment URI", () => {
         status: "paid",
       },
     };
-    context.qrLink = InvoiceDetailDialog.computed.qrLink.call(context);
-    const uri = "bitcoin:bc1qaddress?amount=0.00001234";
-    expect(context.qrLink).toBe(uri);
-    expect(InvoiceDetailDialog.computed.qrValue.call(context)).toBe(uri);
+    expect(InvoiceDetailDialog.computed.qrLink.call(context)).toBeUndefined();
+    expect(InvoiceDetailDialog.computed.qrValue.call(context)).toBe(
+      "bc1qaddress"
+    );
     await InvoiceDetailDialog.methods.onCopyBolt11.call(context);
-    expect(copyToClipboard).toHaveBeenCalledWith(uri);
+    expect(copyToClipboard).toHaveBeenCalledWith("bc1qaddress");
   });
 
   it("can still display legacy amountless on-chain quotes", () => {
     expect(
-      InvoiceDetailDialog.computed.qrLink.call({
+      InvoiceDetailDialog.computed.qrValue.call({
         isOnchain: true,
         invoiceData: { request: "bc1qaddress", amount: 0, unit: "sat" },
       })
-    ).toBe("bitcoin:bc1qaddress");
+    ).toBe("bc1qaddress");
   });
 
   it("keeps Lightning QR and clipboard behavior", async () => {
