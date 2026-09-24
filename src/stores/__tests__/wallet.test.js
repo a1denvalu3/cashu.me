@@ -2130,6 +2130,49 @@ describe("wallet store", () => {
     expect(wallet.handlePaymentRequest).toHaveBeenCalledWith("CREQB1UPPERCASE");
   });
 
+  it("preserves the raw Cashu URI fallback and its precedence over Lightning", async () => {
+    const wallet = useWalletStore();
+    const cashu = vi
+      .spyOn(wallet, "handlePaymentRequest")
+      .mockRejectedValueOnce(new Error("Invalid decoded request"))
+      .mockResolvedValue(undefined);
+    const lightning = vi
+      .spyOn(wallet, "handleBolt11InvoiceBolt11")
+      .mockResolvedValue(undefined);
+
+    await wallet.decodeRequest(
+      "bitcoin:?CREQ=creqAabc+def&LIGHTNING=lnbcfallback"
+    );
+
+    expect(cashu).toHaveBeenNthCalledWith(1, "creqAabc def");
+    expect(cashu).toHaveBeenNthCalledWith(2, "creqAabc+def");
+    expect(lightning).not.toHaveBeenCalled();
+    expect(h.notifyApiError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["lnbcfallback", "handleBolt11InvoiceBolt11"],
+    ["lno1fallback", "handleBolt12Offer"],
+  ])(
+    "preserves the Lightning URI fallback for %s",
+    async (request, handler) => {
+      const wallet = useWalletStore();
+      const handleRequest = vi
+        .spyOn(wallet, handler)
+        .mockRejectedValueOnce(new Error("Could not decode request"))
+        .mockResolvedValue(undefined);
+
+      await wallet.decodeRequest(`bitcoin:?LIGHTNING=${request}`);
+
+      expect(handleRequest).toHaveBeenCalledTimes(2);
+      expect(wallet.payInvoiceData.input.request).toBe(request);
+      if (handler === "handleBolt12Offer") {
+        expect(handleRequest).toHaveBeenLastCalledWith(request);
+      }
+      expect(h.notifyApiError).not.toHaveBeenCalled();
+    }
+  );
+
   describe("BIP321 on-chain payment amounts", () => {
     const address = "bc1qexampleaddress000000000000000000000";
     const testnetAddress = "tb1qexampleaddress000000000000000000000";
@@ -2159,6 +2202,48 @@ describe("wallet store", () => {
         createMeltQuoteOnchain,
       }));
       vi.spyOn(wallet, "meltInvoiceData").mockResolvedValue(undefined);
+    });
+
+    it.each([
+      ["", undefined],
+      ["?AMOUNT=0.00000029", 29],
+    ])(
+      "retains the amount in the address fallback: %s",
+      async (query, amount) => {
+        const url = vi.spyOn(globalThis, "URL").mockImplementationOnce(() => {
+          throw new TypeError("Invalid URL");
+        });
+        try {
+          await wallet.decodeRequest(`bitcoin:${address}${query}`);
+        } finally {
+          url.mockRestore();
+        }
+        expect(wallet.payInvoiceData.invoice.onchain).toBe(address);
+        expect(wallet.payInvoiceData.invoice.onchainAmountSat).toBe(amount);
+        if (amount == null) {
+          expect(createMeltQuoteOnchain).not.toHaveBeenCalled();
+        } else {
+          expect(createMeltQuoteOnchain).toHaveBeenCalledExactlyOnceWith(
+            address,
+            amount
+          );
+        }
+      }
+    );
+
+    it("validates encoded amount keys in the address fallback", async () => {
+      const url = vi.spyOn(globalThis, "URL").mockImplementationOnce(() => {
+        throw new TypeError("Invalid URL");
+      });
+      try {
+        await wallet.decodeRequest(`bitcoin:${address}?%61mount=-1`);
+      } finally {
+        url.mockRestore();
+      }
+      expect(wallet.payInvoiceData.invoice).toBeNull();
+      expect(createMeltQuoteOnchain).not.toHaveBeenCalled();
+      expect(wallet.payInvoiceData.meltQuote.error).not.toBe("");
+      expect(h.notifyApiError).toHaveBeenCalledOnce();
     });
 
     it.each([

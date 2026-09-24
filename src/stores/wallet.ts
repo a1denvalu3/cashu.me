@@ -1512,6 +1512,22 @@ export const useWalletStore = defineStore("wallet", {
         await this.meltQuoteInvoiceData();
       }
     },
+    handleOnchainUri: async function (
+      address: string,
+      params: URLSearchParams
+    ) {
+      try {
+        const amountSat = bitcoinUriAmountSats(params);
+        this.payInvoiceData.input.request = address;
+        await this.handleOnchainAddress(address, amountSat);
+      } catch (error: any) {
+        // Keep amount/quote errors out of the URI parsing fallback.
+        if (!this.payInvoiceData.meltQuote.error) {
+          this.payInvoiceData.meltQuote.error = String(error?.message || error);
+          notifyApiError(error);
+        }
+      }
+    },
     decodeRequest: async function (req: string) {
       const p2pkStore = useP2PKStore();
       req = req.trim();
@@ -1564,17 +1580,28 @@ export const useWalletStore = defineStore("wallet", {
               await this.handleBolt11InvoiceBolt11();
             }
           } else if (address && this.isBitcoinAddress(address)) {
-            const amountSat = bitcoinUriAmountSats(url.searchParams);
-            this.payInvoiceData.input.request = address;
-            await this.handleOnchainAddress(address, amountSat);
+            await this.handleOnchainUri(address, url.searchParams);
           }
-        } catch (error: any) {
-          // Never retry a failed URI as a bare address, which would discard its amount.
-          if (!this.payInvoiceData.meltQuote.error) {
-            this.payInvoiceData.meltQuote.error = String(
-              error?.message || error
+        } catch {
+          const addressMatch = req.match(/^bitcoin:([^?]+)/i);
+          const creqMatch = req.match(/[?&]creq=([^&]+)/i);
+          const lightningMatch = req.match(/[?&]lightning=([^&]+)/i);
+          if (creqMatch) {
+            this.payInvoiceData.input.request = creqMatch[1];
+            await this.handlePaymentRequest(creqMatch[1]);
+          } else if (lightningMatch) {
+            this.payInvoiceData.input.request = lightningMatch[1];
+            const lm = lightningMatch[1];
+            if (lm.toLowerCase().startsWith("lno1")) {
+              await this.handleBolt12Offer(lm);
+            } else {
+              await this.handleBolt11InvoiceBolt11();
+            }
+          } else if (addressMatch && this.isBitcoinAddress(addressMatch[1])) {
+            await this.handleOnchainUri(
+              addressMatch[1],
+              new URLSearchParams(req.split("?")[1])
             );
-            notifyApiError(error);
           }
         }
       } else if (this.isBitcoinAddress(req)) {
