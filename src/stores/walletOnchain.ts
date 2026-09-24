@@ -20,11 +20,7 @@ import type { InvoiceHistory } from "./wallet";
 import { PaymentMethod } from "src/stores/walletTypes";
 import { mintOnPaidGeneric } from "./walletWebsocket";
 import { useTransactionWorkerStore } from "./transactionWorker";
-import { onchainDepositAmountError, onchainNetwork } from "src/js/onchain";
-import {
-  mintPaymentMethodLimits,
-  mintSupportsPaymentMethod,
-} from "src/js/mint-payment-methods";
+import { onchainNetwork } from "src/js/onchain";
 import { type AppMeltQuote, normalizeMeltQuote } from "./walletMelt";
 import { createSubpaymentHistoryQuote } from "src/js/invoice-history";
 import { usePaymentHistoryStore } from "./paymentHistory";
@@ -52,46 +48,14 @@ function normalizeMintQuote(quote: MintQuoteOnchainResponse): AppMintQuote {
   };
 }
 
-export async function requestMintOnchain(
-  this: any,
-  amount: number,
-  mintWallet: Wallet
-) {
+export async function requestMintOnchain(this: any, mintWallet: Wallet) {
   try {
-    const mint = useMintsStore().mints.find(
-      (entry) => entry.url === mintWallet.mint.mintUrl
-    );
-    if (
-      !mint ||
-      !mintSupportsPaymentMethod(
-        mint,
-        PaymentMethod.Onchain,
-        "mint",
-        mintWallet.unit
-      )
-    ) {
-      throw new Error(
-        "This mint does not support on-chain deposits in this unit."
-      );
-    }
-    const error = onchainDepositAmountError(
-      amount,
-      mintWallet.unit,
-      mintPaymentMethodLimits(
-        mint,
-        PaymentMethod.Onchain,
-        "mint",
-        mintWallet.unit
-      )
-    );
-    if (error) throw new Error(error);
-
     const privkey = bytesToHex(nobleSecp256k1.utils.randomPrivateKey());
     const pubkey = bytesToHex(nobleSecp256k1.getPublicKey(privkey, true));
     const data = await mintWallet.createMintQuoteOnchain(pubkey);
 
     const invoice: InvoiceHistory = {
-      amount,
+      amount: 0,
       request: data.request,
       quote: data.quote,
       memo: "",

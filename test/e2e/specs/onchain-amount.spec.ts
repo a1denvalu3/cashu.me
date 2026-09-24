@@ -5,8 +5,9 @@ import { WalletUi } from "../pages/WalletUi";
 
 test.use({ viewport: { width: 390, height: 844 } });
 
-test("requires an in-range on-chain amount and displays a bare address in receive and history", async ({
+test("validates new on-chain addresses while preserving quote reuse and history minting", async ({
   page,
+  request,
 }) => {
   const wallet = new WalletUi(page);
   await wallet.goto();
@@ -28,6 +29,7 @@ test("requires an in-range on-chain amount and displays a bare address in receiv
   await wallet.openReceive("onchain");
   const create = page.getByTestId("create-payment-request");
   const error = page.getByTestId("onchain-amount-error");
+  const limitsBanner = page.locator(".deposit-limits-warning:visible");
   let submissions = 0;
   page.on("request", (request) => {
     if (
@@ -37,6 +39,7 @@ test("requires an in-range on-chain amount and displays a bare address in receiv
       submissions++;
   });
   await expect(create).toBeDisabled();
+  await expect(limitsBanner).toHaveCount(0);
   await expect(page.locator(".qr-container:visible")).toHaveCount(0);
   await wallet.enterAmount(999);
   await expect(error).toContainText("at least 1000 sat");
@@ -70,6 +73,7 @@ test("requires an in-range on-chain amount and displays a bare address in receiv
   const quote = await (await created).json();
   const addressText = page.locator(".qr-copy-text:visible");
   await expect(addressText).toContainText(quote.request);
+  await expect(limitsBanner).toBeVisible();
   await expect(addressText).not.toContainText("bitcoin:");
   await expect(page.locator(".qr-container:visible a")).toHaveCount(0);
   await page.locator(".qr-copy-text:visible").click();
@@ -79,18 +83,60 @@ test("requires an in-range on-chain amount and displays a bare address in receiv
   expect(submissions).toBe(1);
   await wallet.closeFullscreenDialog();
   await wallet.openReceive("onchain");
-  await expect(create).toBeDisabled();
-  await expect(page.locator(".qr-container:visible")).toHaveCount(0);
-  await wallet.closeFullscreenDialog();
-  await page.reload();
-  await wallet.home("History");
-  await page
-    .getByTestId("history-row")
-    .first()
-    .getByTestId("history-details")
-    .click();
   await expect(addressText).toContainText(quote.request);
   await expect(addressText).not.toContainText("bitcoin:");
+  await expect(limitsBanner).toBeVisible();
+  await expect(error).toHaveCount(0);
+  await expect(create).toHaveText("Create New Address");
+  expect(submissions).toBe(1);
+  await addressText.click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(quote.request);
+  await create.click();
+  await expect(create).toBeDisabled();
+  await expect(page.locator(".qr-container:visible")).toHaveCount(0);
+  await expect(limitsBanner).toHaveCount(0);
+  expect(submissions).toBe(1);
+  await wallet.enterAmount(2500);
+  const nextCreated = page.waitForResponse(
+    (response) =>
+      response.url() === `${MINT_A_URL}/v1/mint/quote/onchain` &&
+      response.request().method() === "POST"
+  );
+  await create.click();
+  const nextQuote = await (await nextCreated).json();
+  expect(nextQuote.quote).not.toBe(quote.quote);
+  await expect(addressText).toContainText(nextQuote.request);
+  expect(submissions).toBe(2);
+  await wallet.closeFullscreenDialog();
+  await page.reload();
+  await wallet.openReceive("onchain");
+  await expect(addressText).toContainText(nextQuote.request);
+  await expect(create).toHaveText("Create New Address");
+  expect(submissions).toBe(2);
+  await wallet.closeFullscreenDialog();
+  await wallet.home("History");
+  const oldRow = page.getByTestId("history-row").last();
+  await oldRow.getByTestId("history-details").click();
+  await expect(addressText).toContainText(quote.request);
+  await expect(addressText).not.toContainText("bitcoin:");
+  await wallet.closeFullscreenDialog();
+  await expect
+    .poll(async () => {
+      const response = await request.get(
+        `${MINT_A_URL}/v1/mint/quote/onchain/${quote.quote}`
+      );
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).amount_paid;
+    })
+    .toBe(1000);
+  await expect.poll(() => wallet.balanceSats()).toBe(0);
+  await page.unroute(`${MINT_A_URL}/v1/mint/quote/onchain/**`);
+  await oldRow.getByTestId("history-details").click();
+  await expect.poll(() => wallet.balanceSats()).toBe(1000);
+  await wallet.closeFullscreenDialog();
+  await expect(oldRow).not.toContainText("Pending");
 });
 
 test("pays BIP321 on-chain URIs using their encoded amounts", async ({

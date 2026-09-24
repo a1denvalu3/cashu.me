@@ -68,11 +68,14 @@ describe("onchainDepositAmountError", () => {
     }
   );
 
-  it("requires whole sats when the mint uses msat", () => {
-    expect(onchainDepositAmountError(1001, "msat", null)).not.toBe("");
-    expect(onchainDepositAmountError(1000, "msat", null)).toBe("");
-    expect(onchainDepositAmountError(1000, "usd", null)).not.toBe("");
-  });
+  it.each(["sat", "msat", "usd"])(
+    "uses the mint's %s limits without adding currency restrictions",
+    (unit) => {
+      const limits = { minAmount: 1000, maxAmount: 5000 };
+      expect(onchainDepositAmountError(1001, unit, limits)).toBe("");
+      expect(onchainDepositAmountError(999, unit, limits)).not.toBe("");
+    }
+  );
 });
 
 describe("bitcoinUriAmountSats", () => {

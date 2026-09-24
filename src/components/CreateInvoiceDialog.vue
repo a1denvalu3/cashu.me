@@ -136,22 +136,36 @@
                     />
                     {{ qrPreview.text }}
                   </div>
+                  <OnchainDepositLimits
+                    v-if="isOnchain"
+                    class="q-mt-md"
+                    :mint-url="activeMintUrl"
+                    :unit="activeUnit"
+                  />
                 </template>
               </div>
+            </div>
+            <div
+              v-else-if="isOnchain && checkingReusableOnchainQuote"
+              key="checking-onchain"
+              class="column items-center justify-center q-pa-xl q-my-auto"
+            >
+              <q-spinner size="48px" color="primary" />
+              <div class="text-grey-6 q-mt-md">Checking address...</div>
             </div>
             <AmountInputComponent
               v-else-if="showAmountInput"
               key="amount-input"
               class="q-my-auto"
               v-model="invoiceData.amount"
-              :enabled="!createInvoiceButtonBlocked"
+              :enabled="!isOnchain || !createInvoiceButtonBlocked"
               :muted="isOnchain && !!onchainAmountError"
               @enter="requestMintButton"
               @fiat-mode-changed="fiatKeyboardMode = $event"
             />
           </transition>
           <div
-            v-if="isOnchain && onchainAmountError"
+            v-if="isOnchain && showAmountInput && onchainAmountError"
             class="text-negative text-center text-body2 q-mb-sm"
             role="status"
             data-testid="onchain-amount-error"
@@ -251,6 +265,7 @@ import VueQrcode from "@chenfengyuan/vue-qrcode";
 import ChooseMint from "src/components/ChooseMint.vue";
 import NumericKeyboard from "src/components/NumericKeyboard.vue";
 import AmountInputComponent from "src/components/AmountInputComponent.vue";
+import OnchainDepositLimits from "src/components/OnchainDepositLimits.vue";
 import { useWalletStore } from "src/stores/wallet";
 import { useUiStore } from "src/stores/ui";
 import { useMintsStore } from "src/stores/mints";
@@ -263,6 +278,7 @@ import {
   mintSupportsPaymentMethod,
 } from "src/js/mint-payment-methods";
 import { onchainDepositAmountError } from "src/js/onchain";
+import { notifyError } from "src/js/notify";
 import { useNpubCashStore } from "src/stores/npubcash";
 import { lightningAddressToLnurl } from "src/js/lnurl";
 
@@ -275,6 +291,7 @@ export default defineComponent({
     ChooseMint,
     NumericKeyboard,
     AmountInputComponent,
+    OnchainDepositLimits,
     VueQrcode,
   },
   props: {},
@@ -283,12 +300,15 @@ export default defineComponent({
       createInvoiceButtonBlocked: false,
       fiatKeyboardMode: false as boolean,
       bolt12AddAmount: false as boolean,
+      onchainAddAmount: false,
       npubCashAddAmount: false as boolean,
       npubCashAddressCopied: false,
       npubCashCopyTimeout: null as ReturnType<typeof setTimeout> | null,
       copyButtonCopied: false,
       copyButtonTimeout: null as any,
       refreshingMint: false,
+      checkingReusableOnchainQuote: false,
+      checkedReusableOnchainQuote: null as InvoiceHistory | null,
     };
   },
   computed: {
@@ -325,7 +345,11 @@ export default defineComponent({
     },
     showAmountInput(): boolean {
       if (this.showNpubCashPreview) return false;
-      if (this.isOnchain) return true;
+      if (this.isOnchain)
+        return (
+          this.onchainAddAmount ||
+          (!this.checkingReusableOnchainQuote && !this.reusableOnchainQuote)
+        );
       if (!this.isBolt12) return true;
       return this.bolt12AddAmount;
     },
@@ -418,12 +442,12 @@ export default defineComponent({
           copied: this.npubCashAddressCopied,
         };
       }
-      if (this.showReusableQuote) {
+      if (!this.checkingReusableOnchainQuote && this.showReusableQuote) {
         return {
           key: "reusable-quote",
           kind: "reusable",
           value: this.reusableQrValue,
-          text: this.reusableBolt12Offer?.request || "",
+          text: this.reusableReceiveQuote?.request || "",
           copied: this.copyButtonCopied,
         };
       }
@@ -443,14 +467,14 @@ export default defineComponent({
       );
     },
     canCreate(): boolean {
-      if (
-        this.activeMintErrored ||
-        this.createInvoiceButtonBlocked ||
-        this.globalMutexLock
-      )
-        return false;
+      if (this.activeMintErrored) return false;
       if (this.isOnchain)
-        return this.onchainSupported && !this.onchainAmountError;
+        return (
+          this.onchainSupported &&
+          !this.createInvoiceButtonBlocked &&
+          !this.globalMutexLock &&
+          (this.showReusableQuote || !this.onchainAmountError)
+        );
       // Bolt12 supports amountless offers; Bolt11 requires a positive amount.
       if (this.isBolt12) return true;
       return (
@@ -462,7 +486,7 @@ export default defineComponent({
         return this.showReusableQuote ? "New Offer" : "Create Offer";
       }
       if (this.isOnchain) {
-        return "Create Address";
+        return this.showReusableQuote ? "Create New Address" : "Create Address";
       }
       return this.$t("InvoiceDetailDialog.actions.create.label") as string;
     },
@@ -505,26 +529,39 @@ export default defineComponent({
       }
       return null;
     },
+    reusableOnchainQuote(): InvoiceHistory | null {
+      return this.checkedReusableOnchainQuote;
+    },
+    reusableReceiveQuote(): InvoiceHistory | null {
+      return this.isOnchain
+        ? this.reusableOnchainQuote
+        : this.reusableBolt12Offer;
+    },
     reusableQrValue(): string {
-      const request = this.reusableBolt12Offer?.request || "";
+      const request = this.reusableReceiveQuote?.request || "";
+      if (this.isOnchain) return request;
       return `lightning:${request.toUpperCase()}`;
     },
     showReusableQuote(): boolean {
       return (
-        this.isBolt12 &&
+        (this.isBolt12 || this.isOnchain) &&
         !this.showAmountInput &&
-        this.reusableBolt12Offer !== null
+        this.reusableReceiveQuote !== null
       );
     },
   },
   watch: {
     showCreateInvoiceDialog: function (val) {
       if (val) {
+        this.onchainAddAmount = false;
         this.npubCashAddAmount = false;
         this.npubCashAddressCopied = false;
         this.$nextTick(() => {
           this.showNumericKeyboard = !this.showNpubCashPreview;
         });
+        this.refreshReusableOnchainQuote();
+      } else {
+        this.checkedReusableOnchainQuote = null;
       }
     },
     activeMintUrl: {
@@ -543,6 +580,7 @@ export default defineComponent({
     },
     activeUnit: function () {
       this.syncInvoiceTypeWithActiveMint();
+      this.refreshReusableOnchainQuote();
     },
   },
   methods: {
@@ -602,6 +640,7 @@ export default defineComponent({
         } else if (!this.onchainSupported && this.bolt12Supported) {
           this.invoiceData.type = PaymentMethod.Bolt12;
         }
+        this.refreshReusableOnchainQuote();
         return;
       }
       if (this.bolt11Supported && !this.bolt12Supported) {
@@ -612,6 +651,14 @@ export default defineComponent({
     },
     requestMintButton: async function () {
       if (!this.canCreate) {
+        return;
+      }
+      if (this.isOnchain && this.showReusableQuote) {
+        this.onchainAddAmount = true;
+        this.invoiceData.amount = "";
+        this.$nextTick(() => {
+          this.showNumericKeyboard = true;
+        });
         return;
       }
       try {
@@ -625,7 +672,39 @@ export default defineComponent({
         const wallet = await this.activeWallet(true);
 
         if (this.isOnchain) {
-          const mintQuote = await this.requestMintOnchain(amount, wallet);
+          // Validate again against the refreshed mint before creating an address.
+          const mint = this.mints.find(
+            (entry) => entry.url === wallet.mint.mintUrl
+          );
+          if (
+            !mint ||
+            !mintSupportsPaymentMethod(
+              mint,
+              PaymentMethod.Onchain,
+              "mint",
+              wallet.unit
+            )
+          ) {
+            notifyError(
+              "This mint does not support on-chain deposits in this unit."
+            );
+            return;
+          }
+          const error = onchainDepositAmountError(
+            amount,
+            wallet.unit,
+            mintPaymentMethodLimits(
+              mint,
+              PaymentMethod.Onchain,
+              "mint",
+              wallet.unit
+            )
+          );
+          if (error) {
+            notifyError(error);
+            return;
+          }
+          const mintQuote = await this.requestMintOnchain(wallet);
 
           this.showCreateInvoiceDialog = false;
           this.showInvoiceDetails = true;
@@ -657,7 +736,7 @@ export default defineComponent({
       if (this.activeMintErrored) {
         return;
       }
-      const offer = this.reusableBolt12Offer;
+      const offer = this.reusableReceiveQuote;
       const request = offer?.request;
       if (request) {
         try {
@@ -681,11 +760,39 @@ export default defineComponent({
       this.refreshingMint = true;
       try {
         await this.activateMintUrl(this.activeMintUrl, false, true);
+        this.refreshReusableOnchainQuote();
       } catch (error) {
         console.error("Could not refresh mint", error);
       } finally {
         this.refreshingMint = false;
       }
+    },
+    findReusableOnchainQuotes(): InvoiceHistory[] {
+      const walletStore = useWalletStore();
+      const mintStore = useMintsStore();
+      const now = Date.now();
+      return walletStore.invoiceHistory
+        .filter((invoice: InvoiceHistory) => {
+          if (invoice.type !== PaymentMethod.Onchain) return false;
+          if (invoice.amount < 0) return false;
+          // A paid address must never be offered again, to avoid address reuse.
+          if (invoice.status !== "pending") return false;
+          const quote = invoice.mintQuote as any;
+          if (quote?.expiry && quote.expiry > 0 && quote.expiry * 1000 < now) {
+            return false;
+          }
+          if (invoice.mint !== mintStore.activeMintUrl) return false;
+          if (invoice.unit !== mintStore.activeUnit) return false;
+          if (!invoice.request) return false;
+          return true;
+        })
+        .reverse();
+    },
+    refreshReusableOnchainQuote() {
+      if (!this.showCreateInvoiceDialog || !this.isOnchain) return;
+      this.checkingReusableOnchainQuote = false;
+      this.checkedReusableOnchainQuote =
+        this.findReusableOnchainQuotes()[0] || null;
     },
   },
   beforeUnmount() {

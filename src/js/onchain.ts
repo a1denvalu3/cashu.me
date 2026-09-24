@@ -35,14 +35,8 @@ export function onchainDepositAmountError(
   unit: string,
   limits: PaymentMethodLimits | null
 ): string {
-  if (unit !== "sat" && unit !== "msat") {
-    return "On-chain deposits require a sat or msat mint.";
-  }
   if (!Number.isSafeInteger(amount) || amount <= 0) {
     return `Enter a positive whole amount in ${unit}.`;
-  }
-  if (unit === "msat" && amount % 1000 !== 0) {
-    return "On-chain deposits must be in whole satoshis (1,000 msat).";
   }
   if (limits?.minAmount != null && amount < limits.minAmount) {
     return `Enter at least ${limits.minAmount} ${unit}.`;

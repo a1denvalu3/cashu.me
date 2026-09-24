@@ -1030,7 +1030,7 @@ describe("wallet store", () => {
     expect(websocket.connection.cancelSubscription).not.toHaveBeenCalled();
   });
 
-  describe("on-chain quote amount validation", () => {
+  it("keeps on-chain quotes amountless until the mint reports a payment", async () => {
     const quote = {
       quote: "onchain-q",
       request: "bc1qaddress",
@@ -1039,107 +1039,29 @@ describe("wallet store", () => {
       amount_issued: 0,
       expiry: 0,
     };
-    let mintWallet;
-    beforeEach(() => {
-      h.mintsStore.mints[0].info.nuts = {
-        4: {
-          methods: [
-            {
-              method: "bolt11",
-              unit: "sat",
-              min_amount: 1,
-              max_amount: 1000000,
-            },
-            {
-              method: "onchain",
-              unit: "msat",
-              min_amount: 1,
-              max_amount: 1000000,
-            },
-            {
-              method: "onchain",
-              unit: "sat",
-              min_amount: 1000,
-              max_amount: 5000,
-            },
-          ],
-        },
-      };
-      mintWallet = {
-        mint: { mintUrl: "https://mint-a.example" },
-        unit: "sat",
-        createMintQuoteOnchain: vi.fn().mockResolvedValue(quote),
-      };
+    const mintWallet = {
+      mint: { mintUrl: "https://mint-a.example" },
+      unit: "sat",
+      createMintQuoteOnchain: vi.fn().mockResolvedValue(quote),
+    };
+    const wallet = useWalletStore();
+    wallet.invoiceData.amount = 1234;
+    await wallet.requestMintOnchain(mintWallet);
+    expect(mintWallet.createMintQuoteOnchain).toHaveBeenCalledOnce();
+    expect(mintWallet.createMintQuoteOnchain.mock.calls[0]).toEqual([
+      expect.any(String),
+    ]);
+    expect(wallet.invoiceData).toMatchObject({
+      amount: 0,
+      request: quote.request,
     });
-
-    it.each([0, -1, 999, 5001, 1000.5, NaN, Infinity, undefined])(
-      "rejects %s before calling the mint or recording a quote",
-      async (amount) => {
-        const wallet = useWalletStore();
-        await expect(
-          wallet.requestMintOnchain(amount, mintWallet)
-        ).rejects.toThrow();
-        expect(mintWallet.createMintQuoteOnchain).not.toHaveBeenCalled();
-        expect(await cashuDb.paymentHistory.count()).toBe(0);
-        expect(h.notifyApiError).toHaveBeenCalled();
-      }
-    );
-
-    it.each([1000, 5000])(
-      "accepts the inclusive boundary %s and persists the deposit amount",
-      async (amount) => {
-        const wallet = useWalletStore();
-        await wallet.requestMintOnchain(amount, mintWallet);
-        expect(mintWallet.createMintQuoteOnchain).toHaveBeenCalledOnce();
-        expect(wallet.invoiceData).toMatchObject({
-          amount,
-          request: quote.request,
-        });
-        expect(await cashuDb.paymentHistory.toArray()).toEqual([
-          expect.objectContaining({
-            amount,
-            request: quote.request,
-          }),
-        ]);
-        await wallet.setInvoicePaid(quote.quote, { amount: 1500 });
-        expect((await cashuDb.paymentHistory.toArray())[0]).toMatchObject({
-          amount: 1500,
-          status: "paid",
-        });
-      }
-    );
-
-    it("checks the quote wallet's mint even if the active mint changes", async () => {
-      h.mintsStore.activeMintUrl = "https://other-mint.example";
-      h.mintsStore.mints.push({
-        url: h.mintsStore.activeMintUrl,
-        info: {
-          nuts: {
-            4: {
-              methods: [
-                {
-                  method: "onchain",
-                  unit: "sat",
-                  min_amount: 1,
-                  max_amount: 1000000,
-                },
-              ],
-            },
-          },
-        },
-      });
-      await expect(
-        useWalletStore().requestMintOnchain(999, mintWallet)
-      ).rejects.toThrow("at least 1000 sat");
-      expect(mintWallet.createMintQuoteOnchain).not.toHaveBeenCalled();
-    });
-
-    it("rejects disabled minting", async () => {
-      h.mintsStore.mints[0].info.nuts[4].disabled = true;
-      await expect(
-        useWalletStore().requestMintOnchain(1000, mintWallet)
-      ).rejects.toThrow("does not support");
-      expect(mintWallet.createMintQuoteOnchain).not.toHaveBeenCalled();
+    expect(await cashuDb.paymentHistory.toArray()).toEqual([
+      expect.objectContaining({ amount: 0, request: quote.request }),
+    ]);
+    await wallet.setInvoicePaid(quote.quote, { amount: 1500 });
+    expect((await cashuDb.paymentHistory.toArray())[0]).toMatchObject({
+      amount: 1500,
+      status: "paid",
     });
   });
 
