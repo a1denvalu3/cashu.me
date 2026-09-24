@@ -319,6 +319,18 @@ export const useWalletStore = defineStore("wallet", {
     resetInvoiceData(method: PaymentMethod = PaymentMethod.Bolt11) {
       this.invoiceData = createIncomingInvoiceDraft(method);
     },
+    resetPaymentRequestState() {
+      // Keep the raw request while discarding the previous payment and quote.
+      this.payInvoiceData.invoice = null;
+      this.payInvoiceData.input.amount = undefined;
+      this.payInvoiceData.input.quote = "";
+      this.payInvoiceData.meltQuote.response = {
+        quote: "",
+        amount: 0,
+        fee_reserve: 0,
+      };
+      this.payInvoiceData.meltQuote.error = "";
+    },
     async addPaymentHistory(invoice: InvoiceHistory) {
       const paymentHistoryStore = usePaymentHistoryStore();
       this.invoiceHistory.push(invoice);
@@ -1407,14 +1419,7 @@ export const useWalletStore = defineStore("wallet", {
     handleBolt12Offer: async function (offer: string) {
       const mintStore = useMintsStore();
       this.payInvoiceData.show = true;
-      this.payInvoiceData.input.amount = undefined;
-      this.payInvoiceData.input.quote = "";
-      this.payInvoiceData.meltQuote.error = "";
-      this.payInvoiceData.meltQuote.response = {
-        quote: "",
-        amount: 0,
-        fee_reserve: 0,
-      };
+      this.resetPaymentRequestState();
       let decoded;
       try {
         decoded = decodeBolt12Offer(offer);
@@ -1473,14 +1478,7 @@ export const useWalletStore = defineStore("wallet", {
     handleOnchainAddress: async function (address: string, amountSat?: number) {
       const mintStore = useMintsStore();
       this.payInvoiceData.show = true;
-      this.payInvoiceData.input.amount = undefined;
-      this.payInvoiceData.input.quote = "";
-      this.payInvoiceData.meltQuote.error = "";
-      this.payInvoiceData.meltQuote.response = {
-        quote: "",
-        amount: 0,
-        fee_reserve: 0,
-      };
+      this.resetPaymentRequestState();
 
       const cleanAddress = {
         request: address,
@@ -1536,15 +1534,7 @@ export const useWalletStore = defineStore("wallet", {
         }
       } else if (req.toLowerCase().startsWith("bitcoin:")) {
         // A new URI must not leave an earlier payment available after a parse error.
-        this.payInvoiceData.invoice = null;
-        this.payInvoiceData.input.amount = undefined;
-        this.payInvoiceData.input.quote = "";
-        this.payInvoiceData.meltQuote.response = {
-          quote: "",
-          amount: 0,
-          fee_reserve: 0,
-        };
-        this.payInvoiceData.meltQuote.error = "";
+        this.resetPaymentRequestState();
         try {
           const url = new URL(
             req.replace(/^bitcoin:/i, "bitcoin://placeholder/")
