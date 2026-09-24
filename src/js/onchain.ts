@@ -1,35 +1,5 @@
 import type { PaymentMethodLimits } from "src/js/mint-payment-methods";
 
-/** Read a BIP321 decimal BTC amount without floating-point rounding. */
-export function bitcoinUriAmountSats(
-  params: URLSearchParams
-): number | undefined {
-  const amounts = [...params]
-    .filter(([key]) => key.toLowerCase() === "amount")
-    .map(([, value]) => value);
-  if (amounts.length === 0) return undefined;
-  if (amounts.length !== 1) {
-    throw new Error("Bitcoin payment URI must contain only one amount.");
-  }
-  const value = amounts[0];
-  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)) {
-    throw new Error(
-      "Bitcoin payment URI amount must be a positive decimal BTC amount."
-    );
-  }
-  const [whole, fraction = ""] = value.split(".");
-  if (/[1-9]/.test(fraction.slice(8))) {
-    throw new Error("Bitcoin payment URI amount must be in whole satoshis.");
-  }
-  const sats =
-    BigInt(whole || "0") * 100_000_000n +
-    BigInt(fraction.slice(0, 8).padEnd(8, "0"));
-  if (sats <= 0n || sats > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error("Bitcoin payment URI amount is out of range.");
-  }
-  return Number(sats);
-}
-
 export function onchainDepositAmountError(
   amount: number,
   unit: string,
@@ -64,12 +34,7 @@ export function normalizeBitcoinAddress(value: string): string {
   const trimmed = value.trim();
   if (!trimmed.toLowerCase().startsWith("bitcoin:")) return trimmed;
   const withoutScheme = trimmed.replace(/^bitcoin:/i, "");
-  const [address, query] = withoutScheme.split("?");
-  if (address) return address;
-  for (const [key, value] of new URLSearchParams(query)) {
-    if (["bc", "tb", "bcrt"].includes(key.toLowerCase())) return value;
-  }
-  return "";
+  return withoutScheme.split("?")[0];
 }
 
 export function onchainNetwork(address: string): OnchainNetwork {

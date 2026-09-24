@@ -106,11 +106,7 @@ import {
   isLegacyRetailQR,
   translateLegacyQRToLightningAddress,
 } from "src/js/legacy-qr";
-import {
-  bitcoinUriAmountSats,
-  normalizeBitcoinAddress,
-  onchainNetwork,
-} from "src/js/onchain";
+import { onchainNetwork } from "src/js/onchain";
 import { PaymentMethod } from "src/stores/walletTypes";
 
 type Invoice = {
@@ -318,18 +314,6 @@ export const useWalletStore = defineStore("wallet", {
     },
     resetInvoiceData(method: PaymentMethod = PaymentMethod.Bolt11) {
       this.invoiceData = createIncomingInvoiceDraft(method);
-    },
-    resetPaymentRequestState() {
-      // Keep the raw request while discarding the previous payment and quote.
-      this.payInvoiceData.invoice = null;
-      this.payInvoiceData.input.amount = undefined;
-      this.payInvoiceData.input.quote = "";
-      this.payInvoiceData.meltQuote.response = {
-        quote: "",
-        amount: 0,
-        fee_reserve: 0,
-      };
-      this.payInvoiceData.meltQuote.error = "";
     },
     async addPaymentHistory(invoice: InvoiceHistory) {
       const paymentHistoryStore = usePaymentHistoryStore();
@@ -1419,7 +1403,14 @@ export const useWalletStore = defineStore("wallet", {
     handleBolt12Offer: async function (offer: string) {
       const mintStore = useMintsStore();
       this.payInvoiceData.show = true;
-      this.resetPaymentRequestState();
+      this.payInvoiceData.input.amount = undefined;
+      this.payInvoiceData.input.quote = "";
+      this.payInvoiceData.meltQuote.error = "";
+      this.payInvoiceData.meltQuote.response = {
+        quote: "",
+        amount: 0,
+        fee_reserve: 0,
+      };
       let decoded;
       try {
         decoded = decodeBolt12Offer(offer);
@@ -1475,15 +1466,21 @@ export const useWalletStore = defineStore("wallet", {
         /^[mn2][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(v)
       );
     },
-    handleOnchainAddress: async function (address: string, amountSat?: number) {
+    handleOnchainAddress: async function (address: string) {
       const mintStore = useMintsStore();
       this.payInvoiceData.show = true;
-      this.resetPaymentRequestState();
+      this.payInvoiceData.input.amount = undefined;
+      this.payInvoiceData.input.quote = "";
+      this.payInvoiceData.meltQuote.error = "";
+      this.payInvoiceData.meltQuote.response = {
+        quote: "",
+        amount: 0,
+        fee_reserve: 0,
+      };
 
       const cleanAddress = {
         request: address,
         onchain: address,
-        onchainAmountSat: amountSat,
         network: onchainNetwork(address),
         memo: "",
         msat: 0,
@@ -1508,25 +1505,6 @@ export const useWalletStore = defineStore("wallet", {
       }
 
       this.payInvoiceData.invoice = Object.freeze(cleanAddress);
-      if (amountSat != null) {
-        await this.meltQuoteInvoiceData();
-      }
-    },
-    handleOnchainUri: async function (
-      address: string,
-      params: URLSearchParams
-    ) {
-      try {
-        const amountSat = bitcoinUriAmountSats(params);
-        this.payInvoiceData.input.request = address;
-        await this.handleOnchainAddress(address, amountSat);
-      } catch (error: any) {
-        // Keep amount/quote errors out of the URI parsing fallback.
-        if (!this.payInvoiceData.meltQuote.error) {
-          this.payInvoiceData.meltQuote.error = String(error?.message || error);
-          notifyApiError(error);
-        }
-      }
     },
     decodeRequest: async function (req: string) {
       const p2pkStore = useP2PKStore();
@@ -1549,13 +1527,11 @@ export const useWalletStore = defineStore("wallet", {
           await this.handleBolt11InvoiceBolt11();
         }
       } else if (req.toLowerCase().startsWith("bitcoin:")) {
-        // A new URI must not leave an earlier payment available after a parse error.
-        this.resetPaymentRequestState();
         try {
           const url = new URL(
             req.replace(/^bitcoin:/i, "bitcoin://placeholder/")
           );
-          const address = normalizeBitcoinAddress(req);
+          const address = url.pathname.replace(/^\//, "");
           // BIP-321 query keys are case-insensitive (per RFC 3986 / BIP-21).
           // Encoders may emit fully uppercase URIs to enable QR alphanumeric
           // mode for denser codes (e.g. CDK, cashu-for-woocommerce).
@@ -1580,7 +1556,8 @@ export const useWalletStore = defineStore("wallet", {
               await this.handleBolt11InvoiceBolt11();
             }
           } else if (address && this.isBitcoinAddress(address)) {
-            await this.handleOnchainUri(address, url.searchParams);
+            this.payInvoiceData.input.request = address;
+            await this.handleOnchainAddress(address);
           }
         } catch {
           const addressMatch = req.match(/^bitcoin:([^?]+)/i);
@@ -1598,10 +1575,8 @@ export const useWalletStore = defineStore("wallet", {
               await this.handleBolt11InvoiceBolt11();
             }
           } else if (addressMatch && this.isBitcoinAddress(addressMatch[1])) {
-            await this.handleOnchainUri(
-              addressMatch[1],
-              new URLSearchParams(req.split("?")[1])
-            );
+            this.payInvoiceData.input.request = addressMatch[1];
+            await this.handleOnchainAddress(addressMatch[1]);
           }
         }
       } else if (this.isBitcoinAddress(req)) {

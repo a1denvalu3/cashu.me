@@ -20,13 +20,12 @@ afterEach(() => {
 });
 
 describe("InvoiceDetailDialog payment display", () => {
-  it("uses a bare on-chain address for the QR and clipboard even for older URI-enabled history", async () => {
+  it("uses a bare on-chain address for the QR and clipboard", async () => {
     vi.useFakeTimers();
     const context: any = {
       isOnchain: true,
       invoiceData: {
         request: "bc1qaddress",
-        requestedAmount: 1234,
         amount: 1200,
         unit: "sat",
         status: "paid",
@@ -40,7 +39,7 @@ describe("InvoiceDetailDialog payment display", () => {
     expect(copyToClipboard).toHaveBeenCalledWith("bc1qaddress");
   });
 
-  it("can still display legacy amountless on-chain quotes", () => {
+  it("displays amountless on-chain quotes", () => {
     expect(
       InvoiceDetailDialog.computed.qrValue.call({
         isOnchain: true,

@@ -1,5 +1,5 @@
 import { expect, test } from "../fixtures/test";
-import { MINT_A_URL, counterpartyRequest } from "../fixtures/mint";
+import { MINT_A_URL } from "../fixtures/mint";
 import { disableAutomaticChecks, holdIncomingQuote } from "../fixtures/ui";
 import { WalletUi } from "../pages/WalletUi";
 
@@ -137,42 +137,4 @@ test("validates new on-chain addresses while preserving quote reuse and history 
   await expect.poll(() => wallet.balanceSats()).toBe(1000);
   await wallet.closeFullscreenDialog();
   await expect(oldRow).not.toContainText("Pending");
-});
-
-test("pays BIP321 on-chain URIs using their encoded amounts", async ({
-  page,
-  request,
-}) => {
-  const wallet = new WalletUi(page);
-  await wallet.onboard(MINT_A_URL);
-  await wallet.mintBolt11(100);
-
-  for (const queryAddress of [false, true]) {
-    const address = await counterpartyRequest(request, "onchain");
-    const key = address.startsWith("tb1") ? "tb" : "bc";
-    const uri = queryAddress
-      ? `BITCOIN:?${key.toUpperCase()}=${address}&AMOUNT=0.00000029`
-      : `bitcoin:${address}?amount=0.00000029`;
-    const before = await wallet.balanceSats();
-    await wallet.openSend("onchain");
-    const quoted = page.waitForRequest(
-      (request) =>
-        request.method() === "POST" &&
-        request.url() === `${MINT_A_URL}/v1/melt/quote/onchain`
-    );
-    // No manual amount entry: reading the URI should prepare the payment.
-    await wallet.quoteRequest(uri);
-    expect((await quoted).postDataJSON()).toMatchObject({
-      request: address,
-      amount: 29,
-      unit: "sat",
-    });
-    await expect(page.getByTestId("quote-payment-request")).toBeHidden();
-    await expect.poll(() => wallet.balanceSats()).toBe(before);
-    await page.getByTestId("pay-payment-request").click();
-    await expect(page.getByText("Paid", { exact: false })).toBeVisible();
-    // The fake backend charges a one-sat fee.
-    await expect.poll(() => wallet.balanceSats()).toBe(before - 30);
-    await page.getByRole("button", { name: "Close", exact: true }).click();
-  }
 });
