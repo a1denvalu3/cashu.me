@@ -106,7 +106,11 @@ import {
   isLegacyRetailQR,
   translateLegacyQRToLightningAddress,
 } from "src/js/legacy-qr";
-import { normalizeBitcoinAddress, onchainNetwork } from "src/js/onchain";
+import {
+  bitcoinUriAmountSats,
+  normalizeBitcoinAddress,
+  onchainNetwork,
+} from "src/js/onchain";
 import { PaymentMethod } from "src/stores/walletTypes";
 
 type Invoice = {
@@ -1467,7 +1471,7 @@ export const useWalletStore = defineStore("wallet", {
         /^[mn2][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(v)
       );
     },
-    handleOnchainAddress: async function (address: string) {
+    handleOnchainAddress: async function (address: string, amountSat?: number) {
       const mintStore = useMintsStore();
       this.payInvoiceData.show = true;
       this.payInvoiceData.input.amount = undefined;
@@ -1482,6 +1486,7 @@ export const useWalletStore = defineStore("wallet", {
       const cleanAddress = {
         request: address,
         onchain: address,
+        onchainAmountSat: amountSat,
         network: onchainNetwork(address),
         memo: "",
         msat: 0,
@@ -1506,6 +1511,9 @@ export const useWalletStore = defineStore("wallet", {
       }
 
       this.payInvoiceData.invoice = Object.freeze(cleanAddress);
+      if (amountSat != null) {
+        await this.meltQuoteInvoiceData();
+      }
     },
     decodeRequest: async function (req: string) {
       const p2pkStore = useP2PKStore();
@@ -1528,6 +1536,16 @@ export const useWalletStore = defineStore("wallet", {
           await this.handleBolt11InvoiceBolt11();
         }
       } else if (req.toLowerCase().startsWith("bitcoin:")) {
+        // A new URI must not leave an earlier payment available after a parse error.
+        this.payInvoiceData.invoice = null;
+        this.payInvoiceData.input.amount = undefined;
+        this.payInvoiceData.input.quote = "";
+        this.payInvoiceData.meltQuote.response = {
+          quote: "",
+          amount: 0,
+          fee_reserve: 0,
+        };
+        this.payInvoiceData.meltQuote.error = "";
         try {
           const url = new URL(
             req.replace(/^bitcoin:/i, "bitcoin://placeholder/")
@@ -1557,27 +1575,17 @@ export const useWalletStore = defineStore("wallet", {
               await this.handleBolt11InvoiceBolt11();
             }
           } else if (address && this.isBitcoinAddress(address)) {
+            const amountSat = bitcoinUriAmountSats(url.searchParams);
             this.payInvoiceData.input.request = address;
-            await this.handleOnchainAddress(address);
+            await this.handleOnchainAddress(address, amountSat);
           }
-        } catch {
-          const addressMatch = req.match(/^bitcoin:([^?]+)/i);
-          const creqMatch = req.match(/[?&]creq=([^&]+)/i);
-          const lightningMatch = req.match(/[?&]lightning=([^&]+)/i);
-          if (creqMatch) {
-            this.payInvoiceData.input.request = creqMatch[1];
-            await this.handlePaymentRequest(creqMatch[1]);
-          } else if (lightningMatch) {
-            this.payInvoiceData.input.request = lightningMatch[1];
-            const lm = lightningMatch[1];
-            if (lm.toLowerCase().startsWith("lno1")) {
-              await this.handleBolt12Offer(lm);
-            } else {
-              await this.handleBolt11InvoiceBolt11();
-            }
-          } else if (addressMatch && this.isBitcoinAddress(addressMatch[1])) {
-            this.payInvoiceData.input.request = addressMatch[1];
-            await this.handleOnchainAddress(addressMatch[1]);
+        } catch (error: any) {
+          // Never retry a failed URI as a bare address, which would discard its amount.
+          if (!this.payInvoiceData.meltQuote.error) {
+            this.payInvoiceData.meltQuote.error = String(
+              error?.message || error
+            );
+            notifyApiError(error);
           }
         }
       } else if (this.isBitcoinAddress(req)) {

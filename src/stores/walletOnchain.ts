@@ -307,13 +307,29 @@ export async function meltQuoteInvoiceDataOnchain(this: any) {
     const mintStore = useMintsStore();
     const address = this.payInvoiceData.invoice?.onchain;
     if (!address) throw new Error("no on-chain address provided.");
-    const inputAmount = this.payInvoiceData.input.amount;
-    if (!inputAmount || inputAmount <= 0) {
-      throw new Error("no amount provided");
+    const uriAmountSat = this.payInvoiceData.invoice?.onchainAmountSat;
+    let amount: number;
+    if (uriAmountSat != null) {
+      if (mintWallet.unit !== "sat" && mintWallet.unit !== "msat") {
+        throw new Error(
+          "Select a sat or msat mint to pay this Bitcoin payment URI."
+        );
+      }
+      // Recompute from the original BTC amount when the mint or unit changes.
+      amount = uriAmountSat * (mintWallet.unit === "msat" ? 1000 : 1);
+      if (!Number.isSafeInteger(amount) || amount <= 0) {
+        throw new Error(
+          "Bitcoin payment URI amount is out of range for this unit."
+        );
+      }
+      this.payInvoiceData.input.amount = amount;
+    } else {
+      const inputAmount = this.payInvoiceData.input.amount;
+      if (!inputAmount || inputAmount <= 0) {
+        throw new Error("no amount provided");
+      }
+      amount = Math.floor(inputAmount * mintStore.activeUnitCurrencyMultiplyer);
     }
-    const amount = Math.floor(
-      inputAmount * mintStore.activeUnitCurrencyMultiplyer
-    );
     const data = await mintWallet.createMeltQuoteOnchain(address, amount);
     mintStore.assertMintError(data);
     const quote = normalizeMeltQuote(data);
