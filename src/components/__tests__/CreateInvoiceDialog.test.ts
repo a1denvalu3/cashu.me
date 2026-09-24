@@ -246,7 +246,7 @@ describe("CreateInvoiceDialog", () => {
     expect(error()).toBe("");
     context.invoiceData.amount = 1000;
     context.activeUnit = "msat";
-    expect(error()).toContain("2000 msat");
+    expect(error()).toContain("2,000 msat");
     context.activeMint = {
       info: {
         nuts: {
@@ -256,7 +256,7 @@ describe("CreateInvoiceDialog", () => {
         },
       },
     };
-    expect(error()).toContain("10000 msat");
+    expect(error()).toContain("10,000 msat");
   });
 
   describe("validating before on-chain quote creation", () => {
@@ -316,7 +316,7 @@ describe("CreateInvoiceDialog", () => {
       await CreateInvoiceDialog.methods.requestMintButton.call(context);
       expect(context.requestMintOnchain).not.toHaveBeenCalled();
       expect(stores.notifyError).toHaveBeenCalledWith(
-        "Enter at least 2000 sat."
+        "Enter at least 2,000 sat."
       );
       expect(context.createInvoiceButtonBlocked).toBe(false);
     });
@@ -335,7 +335,7 @@ describe("CreateInvoiceDialog", () => {
       await CreateInvoiceDialog.methods.requestMintButton.call(context);
       expect(context.requestMintOnchain).not.toHaveBeenCalled();
       expect(stores.notifyError).toHaveBeenCalledWith(
-        "Enter at least 1000 sat."
+        "Enter at least 1,000 sat."
       );
     });
 
@@ -348,6 +348,60 @@ describe("CreateInvoiceDialog", () => {
       expect(context.requestMintOnchain).not.toHaveBeenCalled();
       expect(stores.notifyError).toHaveBeenCalledWith(
         expect.stringContaining("does not support")
+      );
+    });
+
+    it.each([
+      ["usd", 0.29, 29],
+      ["usd", 1.13, 113],
+      ["usd", 4.1, 410],
+      ["eur", 0.29, 29],
+      ["eur", 1.13, 113],
+      ["eur", 4.1, 410],
+    ])(
+      "accepts %s %s at an exact cent boundary before and after refresh",
+      async (unit, amount, cents) => {
+        Object.assign(mint.info.nuts[4].methods[0], {
+          unit,
+          min_amount: cents,
+          max_amount: cents,
+        });
+        mintWallet.unit = unit;
+        Object.assign(context, {
+          activeUnit: unit,
+          activeUnitCurrencyMultiplyer: 100,
+          activeMint: mint,
+          onchainSupported: true,
+        });
+        context.invoiceData.amount = amount;
+        context.onchainAmountError =
+          CreateInvoiceDialog.computed.onchainAmountError.call(context);
+        expect(context.onchainAmountError).toBe("");
+        context.canCreate =
+          CreateInvoiceDialog.computed.canCreate.call(context);
+        expect(context.canCreate).toBe(true);
+        await CreateInvoiceDialog.methods.requestMintButton.call(context);
+        expect(context.requestMintOnchain).toHaveBeenCalledExactlyOnceWith(
+          mintWallet
+        );
+        expect(stores.notifyError).not.toHaveBeenCalled();
+      }
+    );
+
+    it("creates a small quote when the advertised maximum exceeds the number range", async () => {
+      mint.info.nuts[4].methods[0].max_amount = "18446744073709551615";
+      Object.assign(context, {
+        activeUnit: "sat",
+        activeMint: mint,
+        onchainSupported: true,
+      });
+      context.onchainAmountError =
+        CreateInvoiceDialog.computed.onchainAmountError.call(context);
+      expect(context.onchainAmountError).toBe("");
+      context.canCreate = CreateInvoiceDialog.computed.canCreate.call(context);
+      await CreateInvoiceDialog.methods.requestMintButton.call(context);
+      expect(context.requestMintOnchain).toHaveBeenCalledExactlyOnceWith(
+        mintWallet
       );
     });
   });

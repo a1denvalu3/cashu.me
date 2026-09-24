@@ -54,11 +54,11 @@ export default defineComponent({
         )}.`;
       }
       if (min != null) return `Send at least ${this.formatLimit(min)}.`;
-      return `Send no more than ${this.formatLimit(max as number)}.`;
+      return `Send no more than ${this.formatLimit(max as bigint)}.`;
     },
   },
   methods: {
-    formatLimit(amount: number): string {
+    formatLimit(amount: bigint): string {
       return (this as any).formatCurrency(amount, this.unit, true);
     },
   },

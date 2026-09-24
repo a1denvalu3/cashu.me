@@ -1,9 +1,92 @@
 import { expect, test } from "../fixtures/test";
-import { MINT_A_URL } from "../fixtures/mint";
+import { MINT_A_URL, MINT_C_URL } from "../fixtures/mint";
 import { disableAutomaticChecks, holdIncomingQuote } from "../fixtures/ui";
 import { WalletUi } from "../pages/WalletUi";
 
 test.use({ viewport: { width: 390, height: 844 } });
+
+for (const unit of ["usd", "eur"] as const) {
+  test(`validates cent boundaries and displays ${unit} limits in currency units`, async ({
+    page,
+  }) => {
+    const wallet = new WalletUi(page);
+    await wallet.goto();
+    await page.route(`${MINT_C_URL}/v1/info`, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const method = body.nuts[4].methods.find(
+        (entry: { method: string; unit: string }) =>
+          entry.method === "onchain" && entry.unit === unit
+      );
+      method.min_amount = 113;
+      method.max_amount = 410;
+      await route.fulfill({ response, json: body });
+    });
+    await wallet.onboard(MINT_C_URL);
+    await disableAutomaticChecks(wallet);
+    await holdIncomingQuote(wallet, MINT_C_URL, "onchain");
+    await page
+      .getByRole("button", { name: `Show ${unit.toUpperCase()} balance` })
+      .click();
+    await wallet.openReceive("onchain");
+    const create = page.getByTestId("create-payment-request");
+    const error = page.getByTestId("onchain-amount-error");
+    const symbol = unit === "usd" ? "$" : "€";
+    const enterCents = async (cents: number) => {
+      await page.locator(".amount-display:visible").click();
+      for (let i = 0; i < 3; i++) await page.keyboard.press("Backspace");
+      await wallet.enterAmount(cents);
+    };
+    await enterCents(112);
+    await expect(error).toHaveText(`Enter at least ${symbol}1.13.`);
+    await expect(create).toBeDisabled();
+    await enterCents(410);
+    await expect(create).toBeEnabled();
+    await expect(error).toHaveCount(0);
+    await enterCents(411);
+    await expect(error).toHaveText(`Enter no more than ${symbol}4.10.`);
+    await expect(create).toBeDisabled();
+    await enterCents(113);
+    await expect(create).toBeEnabled();
+    await create.click();
+    await expect(page.locator(".qr-copy-text:visible")).toBeVisible();
+    await expect(page.locator(".deposit-limits-warning:visible")).toContainText(
+      `Send between ${symbol}1.13 and ${symbol}4.10.`
+    );
+  });
+}
+
+test("renders and reuses an address with an exact uint64 deposit limit", async ({
+  page,
+}) => {
+  const wallet = new WalletUi(page);
+  await wallet.goto();
+  await page.route(`${MINT_A_URL}/v1/info`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const method = body.nuts[4].methods.find(
+      (entry: { method: string; unit: string }) =>
+        entry.method === "onchain" && entry.unit === "sat"
+    );
+    method.max_amount = "18446744073709551615";
+    await route.fulfill({ response, json: body });
+  });
+  await wallet.onboard(MINT_A_URL);
+  await disableAutomaticChecks(wallet);
+  await holdIncomingQuote(wallet, MINT_A_URL, "onchain");
+  await wallet.openReceive("onchain");
+  await wallet.enterAmount(1000);
+  await page.getByTestId("create-payment-request").click();
+  const banner = page.locator(".deposit-limits-warning:visible");
+  await expect(banner).toContainText("18,446,744,073,709,551,615");
+  await wallet.closeFullscreenDialog();
+  await page.reload();
+  await wallet.openReceive("onchain");
+  await expect(page.getByTestId("create-payment-request")).toHaveText(
+    "Create New Address"
+  );
+  await expect(banner).toContainText("18,446,744,073,709,551,615");
+});
 
 test("validates new on-chain addresses while preserving quote reuse and history minting", async ({
   page,
@@ -42,7 +125,7 @@ test("validates new on-chain addresses while preserving quote reuse and history 
   await expect(limitsBanner).toHaveCount(0);
   await expect(page.locator(".qr-container:visible")).toHaveCount(0);
   await wallet.enterAmount(999);
-  await expect(error).toContainText("at least 1000 sat");
+  await expect(error).toContainText("at least 1,000 sat");
   await expect(create).toBeDisabled();
   // Move focus off the last keypad button before using the physical keyboard.
   await page.locator(".amount-display:visible").click();
@@ -50,7 +133,7 @@ test("validates new on-chain addresses while preserving quote reuse and history 
   expect(submissions).toBe(0);
   for (let i = 0; i < 3; i++) await page.keyboard.press("Backspace");
   await wallet.enterAmount(5001);
-  await expect(error).toContainText("no more than 5000 sat");
+  await expect(error).toContainText("no more than 5,000 sat");
   await expect(create).toBeDisabled();
   // Move focus off the last keypad button before using the physical keyboard.
   await page.locator(".amount-display:visible").click();

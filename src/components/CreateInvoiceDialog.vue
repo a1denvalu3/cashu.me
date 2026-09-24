@@ -277,7 +277,10 @@ import {
   mintPaymentMethodLimits,
   mintSupportsPaymentMethod,
 } from "src/js/mint-payment-methods";
-import { onchainDepositAmountError } from "src/js/onchain";
+import {
+  onchainDepositAmountError,
+  onchainDepositAmountInBaseUnits,
+} from "src/js/onchain";
 import { notifyError } from "src/js/notify";
 import { useNpubCashStore } from "src/stores/npubcash";
 import { lightningAddressToLnurl } from "src/js/lnurl";
@@ -456,7 +459,10 @@ export default defineComponent({
     onchainAmountError(): string {
       if (!this.isOnchain) return "";
       return onchainDepositAmountError(
-        Number(this.invoiceData.amount) * this.activeUnitCurrencyMultiplyer,
+        onchainDepositAmountInBaseUnits(
+          Number(this.invoiceData.amount),
+          this.activeUnitCurrencyMultiplyer
+        ),
         this.activeUnit,
         mintPaymentMethodLimits(
           this.activeMint,
@@ -663,9 +669,14 @@ export default defineComponent({
       }
       try {
         this.showNumericKeyboard = false;
-        const amount = Math.floor(
-          (this.invoiceData.amount || 0) * this.activeUnitCurrencyMultiplyer
-        );
+        const amount = this.isOnchain
+          ? onchainDepositAmountInBaseUnits(
+              Number(this.invoiceData.amount),
+              this.activeUnitCurrencyMultiplyer
+            )
+          : Math.floor(
+              (this.invoiceData.amount || 0) * this.activeUnitCurrencyMultiplyer
+            );
         this.createInvoiceButtonBlocked = true;
 
         // Get wallet instance

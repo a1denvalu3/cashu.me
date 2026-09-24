@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Amount } from "@cashu/cashu-ts";
 import {
   firstMintSupportingPaymentMethods,
   mintPaymentMethodLimits,
@@ -118,8 +119,38 @@ describe("mint payment method helpers", () => {
 
     expect(
       mintPaymentMethodLimits(mint, PaymentMethod.Onchain, "mint", "sat")
-    ).toEqual({ minAmount: 10_000, maxAmount: 1_000_000 });
+    ).toEqual({ minAmount: 10_000n, maxAmount: 1_000_000n });
   });
+
+  it.each([
+    "18446744073709551615",
+    Amount.from("18446744073709551615"),
+    structuredClone(Amount.from("18446744073709551615")),
+  ])(
+    "preserves large limits from JSON, Amounts and stored metadata",
+    (maximum) => {
+      const mint = {
+        ...onchainOnlyMint,
+        info: {
+          nuts: {
+            4: {
+              methods: [
+                {
+                  method: "onchain",
+                  unit: "sat",
+                  min_amount: 1,
+                  max_amount: maximum,
+                },
+              ],
+            },
+          },
+        },
+      };
+      expect(
+        mintPaymentMethodLimits(mint, PaymentMethod.Onchain, "mint", "sat")
+      ).toEqual({ minAmount: 1n, maxAmount: 18446744073709551615n });
+    }
+  );
 
   it("returns null when a mint does not advertise deposit limits", () => {
     expect(

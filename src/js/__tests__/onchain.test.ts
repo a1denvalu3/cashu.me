@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   onchainDepositAmountError,
+  onchainDepositAmountInBaseUnits,
   onchainAddressExplorerUrl,
 } from "src/js/onchain";
 
@@ -33,30 +34,30 @@ describe("onchainDepositAmountError", () => {
   it("enforces one-sided and inclusive limits", () => {
     expect(
       onchainDepositAmountError(999, "sat", {
-        minAmount: 1000,
+        minAmount: 1000n,
         maxAmount: null,
       })
     ).not.toBe("");
     expect(
       onchainDepositAmountError(1000, "sat", {
-        minAmount: 1000,
+        minAmount: 1000n,
         maxAmount: null,
       })
     ).toBe("");
     expect(
       onchainDepositAmountError(5000, "sat", {
         minAmount: null,
-        maxAmount: 5000,
+        maxAmount: 5000n,
       })
     ).toBe("");
     expect(
       onchainDepositAmountError(5001, "sat", {
         minAmount: null,
-        maxAmount: 5000,
+        maxAmount: 5000n,
       })
     ).not.toBe("");
     expect(
-      onchainDepositAmountError(1, "sat", { minAmount: null, maxAmount: 0 })
+      onchainDepositAmountError(1, "sat", { minAmount: null, maxAmount: 0n })
     ).not.toBe("");
   });
 
@@ -70,9 +71,61 @@ describe("onchainDepositAmountError", () => {
   it.each(["sat", "msat", "usd"])(
     "uses the mint's %s limits without adding currency restrictions",
     (unit) => {
-      const limits = { minAmount: 1000, maxAmount: 5000 };
+      const limits = { minAmount: 1000n, maxAmount: 5000n };
       expect(onchainDepositAmountError(1001, unit, limits)).toBe("");
       expect(onchainDepositAmountError(999, unit, limits)).not.toBe("");
     }
   );
+
+  it.each(["usd", "eur"])(
+    "formats %s limits in major currency units",
+    (unit) => {
+      const symbol = unit === "usd" ? "$" : "€";
+      const limits = { minAmount: 1000n, maxAmount: 5000n };
+      expect(onchainDepositAmountError(999, unit, limits)).toBe(
+        `Enter at least ${symbol}10.00.`
+      );
+      expect(onchainDepositAmountError(5001, unit, limits)).toBe(
+        `Enter no more than ${symbol}50.00.`
+      );
+    }
+  );
+
+  it("compares safe input with large bounds without narrowing the limits", () => {
+    const maximum = 18446744073709551615n;
+    expect(
+      onchainDepositAmountError(1000, "sat", {
+        minAmount: 1n,
+        maxAmount: maximum,
+      })
+    ).toBe("");
+    expect(
+      onchainDepositAmountError(Number.MAX_SAFE_INTEGER, "sat", {
+        minAmount: maximum,
+        maxAmount: null,
+      })
+    ).toBe("Enter at least 18,446,744,073,709,551,615 sat.");
+  });
+});
+
+describe("onchainDepositAmountInBaseUnits", () => {
+  it.each([
+    [0.29, 29],
+    [1.13, 113],
+    [4.1, 410],
+  ])("converts %s to exactly %s cents", (input, cents) => {
+    expect(onchainDepositAmountInBaseUnits(input, 100)).toBe(cents);
+  });
+
+  it.each([0.001, 1.131, NaN, Infinity])(
+    "rejects invalid cent precision: %s",
+    (input) => {
+      expect(onchainDepositAmountInBaseUnits(input, 100)).toBeNaN();
+    }
+  );
+
+  it("does not round fractional sats into valid deposits", () => {
+    const amount = onchainDepositAmountInBaseUnits(1.5, 1);
+    expect(onchainDepositAmountError(amount, "sat", null)).not.toBe("");
+  });
 });

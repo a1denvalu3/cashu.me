@@ -1,4 +1,20 @@
 import type { PaymentMethodLimits } from "src/js/mint-payment-methods";
+import { formatBigIntCurrency } from "src/js/format-currency";
+
+export function onchainDepositAmountInBaseUnits(
+  amount: number,
+  currencyMultiplier: number
+): number {
+  if (currencyMultiplier === 100) {
+    // Input uses dollars/euros, while mint limits use integer cents. Reject
+    // sub-cent input, then round away multiplication's floating-point error.
+    if (!Number.isFinite(amount) || Number(amount.toFixed(2)) !== amount) {
+      return NaN;
+    }
+    return Math.round(amount * currencyMultiplier);
+  }
+  return amount * currencyMultiplier;
+}
 
 export function onchainDepositAmountError(
   amount: number,
@@ -6,13 +22,18 @@ export function onchainDepositAmountError(
   limits: PaymentMethodLimits | null
 ): string {
   if (!Number.isSafeInteger(amount) || amount <= 0) {
-    return `Enter a positive whole amount in ${unit}.`;
+    return unit === "usd" || unit === "eur"
+      ? `Enter a positive amount with at most two decimal places in ${unit.toUpperCase()}.`
+      : `Enter a positive whole amount in ${unit}.`;
   }
   if (limits?.minAmount != null && amount < limits.minAmount) {
-    return `Enter at least ${limits.minAmount} ${unit}.`;
+    return `Enter at least ${formatBigIntCurrency(limits.minAmount, unit)}.`;
   }
   if (limits?.maxAmount != null && amount > limits.maxAmount) {
-    return `Enter no more than ${limits.maxAmount} ${unit}.`;
+    return `Enter no more than ${formatBigIntCurrency(
+      limits.maxAmount,
+      unit
+    )}.`;
   }
   return "";
 }
